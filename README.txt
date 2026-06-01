@@ -1,150 +1,150 @@
 ================================================================================
- TRACTION CONTROL MODULE FOR NGINX - DETALHAMENTO TÉCNICO
+ TRACTION CONTROL MODULE FOR NGINX - TECHNICAL DETAILS
 ================================================================================
 
-1. INTRODUÇÃO
+1. INTRODUCTION
+---------------
+
+The ngx_http_traction_control module implements an adaptive circuit breaker
+based on HTTP error rate observed in a sliding time window.
+
+Goal: reduce pressure on degraded upstreams before abrupt collapses by applying
+progressive degradation (warning → 429 → 503).
+
+
+2. ZONE MODEL
 -------------
 
-O módulo ngx_http_traction_control implementa um circuit breaker adaptativo
-baseado em taxa de erros HTTP observada em janela temporal deslizante.
+Each monitored service/upstream has a named "zone" with its own shared memory
+across all workers.
 
-Objetivo: reduzir pressão sobre upstreams degradados antes de colapsos
-abruptos, aplicando degradação progressiva (warning → 429 → 503).
+Declaration:
+  traction_zone <name> <size> [window=N];
 
+Parameters:
+  <name>     - Unique identifier (e.g. api_backend, payments)
+  <size>     - Minimum SHM zone size (e.g. 1m, 512k). Automatically adjusted
+               if smaller than required by the window.
+  window=N   - Window in seconds (1 to 3600, default 60)
 
-2. MODELO DE ZONES
-------------------
+Multiple locations can reference the same zone. Locations using different
+zones keep metrics fully isolated.
 
-Cada serviço/upstream monitorado possui uma "zone" nomeada com memória
-compartilhada própria entre todos os workers.
-
-Declaração:
-  traction_zone <nome> <tamanho> [window=N];
-
-Parâmetros:
-  <nome>     - Identificador único (ex.: api_backend, payments)
-  <tamanho>  - Tamanho mínimo da zona SHM (ex.: 1m, 512k). Ajustado
-               automaticamente se menor que o necessário para a janela.
-  window=N   - Janela em segundos (1 a 3600, padrão 60)
-
-Múltiplas locations podem referenciar a mesma zone. Locations com zones
-diferentes mantêm métricas completamente isoladas.
-
-Exemplo:
+Example:
   traction_zone api_backend 1m window=120;
   traction_zone pay_backend 512k window=300;
 
 
-3. REFERÊNCIA DE DIRETIVAS
---------------------------
+3. DIRECTIVE REFERENCE
+----------------------
 
 traction_zone name size [window=N]
-  Contexto : http
-  Default  : -
+  Context : http
+  Default : -
 
 traction_control on | off | zone=name
-  Contexto : http, server, location
-  Default  : off
-  Notas    : "zone=name" implica enabled=on. Com enabled=on é obrigatório
-             definir uma zone (direta ou herdada).
+  Context : http, server, location
+  Default : off
+  Notes   : "zone=name" implies enabled=on. When enabled=on it is mandatory
+            to define a zone (directly or inherited).
 
 traction_status zone=name
-  Contexto : server, location
-  Default  : -
-  Notas    : Registra handler na fase CONTENT. O location deve ser
-             exclusivo (sem proxy_pass). Proteger com allow/deny.
+  Context : server, location
+  Default : -
+  Notes   : Registers a handler in the CONTENT phase. The location should be
+            exclusive (no proxy_pass). Protect with allow/deny.
 
 traction_warning_threshold N
-  Contexto : http, server, location
-  Default  : 80
-  Faixa    : 0 a 100
+  Context : http, server, location
+  Default : 80
+  Range   : 0 to 100
 
 traction_critical_threshold N
-  Contexto : http, server, location
-  Default  : 50
-  Faixa    : 0 a 100
+  Context : http, server, location
+  Default : 50
+  Range   : 0 to 100
 
 traction_emergency_threshold N
-  Contexto : http, server, location
-  Default  : 20
-  Faixa    : 0 a 100
+  Context : http, server, location
+  Default : 20
+  Range   : 0 to 100
 
-Validação em merge:
+Merge validation:
   emergency_threshold < critical_threshold < warning_threshold
 
 traction_warning_action headers | off | rate_limit=N%
-  Contexto : http, server, location
-  Default  : headers
-  Valores  :
-    headers       - Apenas headers X-Traction-* e log WARN (não bloqueia)
-    off           - Nenhuma ação em warning; bloqueio só em critical/emergency
-    rate_limit=N% - Rejeita N% das requisições com HTTP 429 em warning;
-                    requisições admitidas recebem headers X-Traction-*
-  Faixa N  : 1 a 99 (somente para rate_limit)
+  Context : http, server, location
+  Default : headers
+  Values  :
+    headers       - Only X-Traction-* headers and WARN log (no blocking)
+    off           - No action in warning; blocking only occurs in critical/emergency
+    rate_limit=N% - Reject N% of requests with HTTP 429 in warning;
+                    admitted requests receive X-Traction-* headers
+  Range N  : 1 to 99 (only for rate_limit)
 
 
-4. FLUXO DE REQUISIÇÃO
-----------------------
+4. REQUEST FLOW
+---------------
 
-  Cliente
+  Client
      |
      v
   [PREACCESS] traction_handler
-     |  - Verifica enabled + zone
-     |  - Calcula score na janela da zone
-     |  - emergency  -> 503 + Retry-After (window segundos)
-     |  - critical   -> 429 + Retry-After (1 segundo)
-     |  - warning + rate_limit -> shed N% com 429 (contador atômico)
-     |  - warning/normal -> NGX_DECLINED (continua)
+     |  - Checks enabled + zone
+     |  - Calculates score in the zone window
+     |  - emergency  -> 503 + Retry-After (window seconds)
+     |  - critical   -> 429 + Retry-After (1 second)
+     |  - warning + rate_limit -> shed N% with 429 (atomic counter)
+     |  - warning/normal -> NGX_DECLINED (continue)
      v
   [UPSTREAM] proxy_pass / fastcgi / etc.
      |
      v
   [HEADER FILTER] traction_header_filter
-     |  - Se warning + action headers/rate_limit: X-Traction-State,
-     |    X-Traction-Score, X-Traction-Zone e log NGX_LOG_WARN
+     |  - If warning + action headers/rate_limit: X-Traction-State,
+     |    X-Traction-Score, X-Traction-Zone and NGX_LOG_WARN
      v
-  Resposta ao cliente
+  Response to client
      |
      v
   [LOG] traction_log_handler
-     |  - Somente se r->upstream != NULL
+     |  - Only if r->upstream != NULL
      |  - traction_record_request()
-     |  - traction_record_error() se status >= 500, 502 ou 504
+     |  - traction_record_error() if status >= 500, 502 or 504
      v
-  Fim
+  End
 
 
-5. SLIDING WINDOW E BUCKETS
----------------------------
+5. SLIDING WINDOW AND BUCKETS
+-----------------------------
 
-Estrutura por bucket:
-  requests  (ngx_atomic_t) - contador de requisições
-  errors    (ngx_atomic_t) - contador de erros
-  epoch     (ngx_uint_t)   - segundo wall-clock da última escrita
+Bucket structure:
+  requests  (ngx_atomic_t) - request counter
+  errors    (ngx_atomic_t) - error counter
+  epoch     (ngx_uint_t)   - wall-clock second of last write
 
-Índice do bucket ativo:
+Active bucket index:
   idx = current_unix_time % window
 
-Reset lazy:
-  Quando epoch != current_second, o bucket é zerado antes da escrita.
+Lazy reset:
+  When epoch != current_second, the bucket is zeroed before the write.
 
-Cálculo do score (traction_calculate_stats):
-  - Itera buckets [0 .. window-1]
-  - Ignora buckets onde epoch + window <= now (expirados)
-  - Soma requests e errors com leitura atômica (fetch_add 0)
+Score calculation (traction_calculate_stats):
+  - Iterate buckets [0 .. window-1]
+  - Ignore buckets where epoch + window <= now (expired)
+  - Sum requests and errors with atomic read (fetch_add 0)
   - score = 100 - (errors/requests * 100)
-  - Sem requests na janela: score = 100.0
+  - No requests in the window: score = 100.0
 
-Memória por zone:
+Memory per zone:
   sizeof(traction_zone_shm_t) + window * sizeof(traction_bucket_t)
 
-Campos adicionais na zone SHM:
-  shed_counter (ngx_atomic_t) - contador para rate_limit em warning
+Additional fields in zone SHM:
+  shed_counter (ngx_atomic_t) - counter for rate_limit in warning
 
 
-6. MÁQUINA DE ESTADOS
----------------------
+6. STATE MACHINE
+----------------
 
   traction_get_state(conf, score):
 
@@ -153,103 +153,103 @@ Campos adicionais na zone SHM:
   score >= emergency_threshold      -> TRACTION_STATE_CRITICAL
   score <  emergency_threshold      -> TRACTION_STATE_EMERGENCY
 
-  Ações:
-  NORMAL    - nenhuma intervenção
-  WARNING   - depende de traction_warning_action (ver seção 6.1)
-  CRITICAL  - HTTP 429 (100% bloqueado)
-  EMERGENCY - HTTP 503 (100% bloqueado)
+  Actions:
+  NORMAL    - no intervention
+  WARNING   - depends on traction_warning_action (see section 6.1)
+  CRITICAL  - HTTP 429 (100% blocked)
+  EMERGENCY - HTTP 503 (100% blocked)
 
 
-6.1 AÇÃO EM WARNING (traction_warning_action)
----------------------------------------------
+6.1 WARNING ACTION (traction_warning_action)
+-------------------------------------------
 
-  headers (padrão)
-    - PREACCESS: permite tráfego
-    - HEADER FILTER: adiciona X-Traction-* + log WARN
+  headers (default)
+    - PREACCESS: allow traffic
+    - HEADER FILTER: add X-Traction-* + WARN log
 
   off
-    - Nenhuma intervenção até critical/emergency
+    - No intervention until critical/emergency
 
   rate_limit=N%
-    - PREACCESS: incrementa shed_counter atômico na zone SHM
-      if (counter % 100) < N -> HTTP 429 + Retry-After (1s) + log WARN
-      else -> continua
-    - HEADER FILTER: headers X-Traction-* nas requisições admitidas
+    - PREACCESS: increment atomic shed_counter in the zone SHM
+      if (counter % 100) < N -> HTTP 429 + Retry-After (1s) + WARN log
+      else -> continue
+    - HEADER FILTER: X-Traction-* headers on admitted requests
 
-  Distribuição entre workers:
-    Contador atômico compartilhado garante ~N% de rejeição agregada.
+  Worker distribution:
+    Shared atomic counter ensures ~N% aggregate rejection.
 
 
-7. HEADERS DE RESPOSTA (WARNING)
---------------------------------
+7. RESPONSE HEADERS (WARNING)
+-----------------------------
 
-  Emitidos quando warning_action = headers ou rate_limit
-  (somente em requisições que chegaram ao upstream):
+  Emitted when warning_action = headers or rate_limit
+  (only for requests that reached the upstream):
 
   X-Traction-State: warning
-  X-Traction-Score: <score com 2 casas decimais>
-  X-Traction-Zone:  <nome da zone>
+  X-Traction-Score: <score with 2 decimal places>
+  X-Traction-Zone:  <zone name>
 
 
-8. ENDPOINT traction_status
+8. traction_status ENDPOINT
 ---------------------------
 
-Métodos aceitos: GET, HEAD
+Accepted methods: GET, HEAD
 
-Resposta Content-Type: text/plain
+Response Content-Type: text/plain
 
-Campos:
-  zone                  - nome da zone
-  window                - janela em segundos
-  score                 - score atual
-  requests              - total na janela
-  errors                - total na janela
-  error_rate            - percentual de erros
+Fields:
+  zone                  - zone name
+  window                - window in seconds
+  score                 - current score
+  requests              - total in window
+  errors                - total in window
+  error_rate            - error percentage
   state                 - normal | warning | critical | emergency
-  thresholds            - valores configurados no location
+  thresholds            - values configured in location
   warning_action        - headers | off | rate_limit
-  warning_reject_rate   - percentual N (0 se não rate_limit)
+  warning_reject_rate   - percentage N (0 if not rate_limit)
 
-O estado "critical" ou "emergency" no status reflete o score atual; o
-endpoint não bloqueia requisições — apenas reporta.
+The "critical" or "emergency" state in the status reflects the current score;
+this endpoint does not block requests — it only reports.
 
 
 9. SHARED MEMORY
-----------------
+---------------
 
-Nome interno da zona SHM: traction_zone_<nome>
+Internal SHM zone name: traction_zone_<name>
 
-Inicialização:
-  - traction_zone_register() em postconfiguration (por zone)
-  - traction_zone_init() callback no primeiro ciclo
-  - traction_zones_setup() em init_process de cada worker
+Initialization:
+  - traction_zone_register() in postconfiguration (per zone)
+  - traction_zone_init() callback on the first cycle
+  - traction_zones_setup() in init_process of each worker
 
 Reload (SIGHUP):
-  - Dados existentes são reutilizados via parâmetro data do init callback
+  - Existing data is reused via the init callback data parameter
 
 Fail-open:
-  - Se SHM indisponível no PREACCESS, requisição é permitida com log WARN
+  - If SHM is unavailable in PREACCESS, the request is allowed with WARN log
 
 
-10. COMPILAÇÃO
---------------
+10. BUILD
+--------
 
-Pré-requisitos:
-  - Código-fonte do NGINX (mesma versão alvo)
-  - Toolchain C padrão
+Prerequisites:
+  - NGINX source tree matching the target version
+  - Standard C toolchain
 
-Módulo dinâmico:
+Dynamic module:
   ./configure --add-dynamic-module=/path/to/nginx_circuit_breaker
   make modules
 
-Artefato:
+Artifact:
   objs/ngx_http_traction_control_module.so  (Linux)
-  objs/ngx_http_traction_control_module.so  ou .dll (conforme plataforma)
+  objs/ngx_http_traction_control_module.so  or .dll (depending on platform)
 
-Carregamento:
+Load:
   load_module modules/ngx_http_traction_control_module.so;
 
-Arquivos compilados (config):
+Compiled files (config):
   ngx_http_traction_control_module.c
   traction_handler.c
   traction_shared_memory.c
@@ -263,19 +263,19 @@ Arquivos compilados (config):
   traction_status.c
 
 
-11. ESTRUTURA DE CÓDIGO
------------------------
+11. CODE STRUCTURE
+-----------------
 
 ngx_http_traction_control_module.c
-  Registro do módulo NGINX, diretivas, init de fases e processo.
+  NGINX module registration, directives, phase init, and process setup.
 
 traction_config.c / traction_config.h
-  ngx_http_traction_main_conf_t  - array de zones
+  ngx_http_traction_main_conf_t  - zones array
   ngx_http_traction_loc_conf_t   - enabled, zone, thresholds, status
-  create/merge de configuração por location.
+  create/merge configuration per location.
 
 traction_shared_memory.c / .h
-  Registro de zones SHM, init callback, setup em workers.
+  SHM zone registration, init callback, worker setup.
 
 traction_metrics.c / .h
   traction_record_request(), traction_record_error()
@@ -298,14 +298,14 @@ traction_handler.c
   traction_log_handler()  - LOG
 
 traction_header_filter.c
-  traction_header_filter() - adiciona headers em warning
+  traction_header_filter() - adds warning headers
 
 traction_status.c
   traction_status_content_handler() - CONTENT
 
 
-12. EXEMPLO DE CONFIGURAÇÃO NGINX
----------------------------------
+12. NGINX CONFIGURATION EXAMPLE
+-----------------------------
 
 http {
     load_module modules/ngx_http_traction_control_module.so;
@@ -353,54 +353,54 @@ http {
 13. TROUBLESHOOTING
 -------------------
 
-Verificar se o módulo carregou:
+Check whether the module loaded:
   nginx -V 2>&1 | grep traction
 
 Logs:
   tail -f /var/log/nginx/error.log | grep traction
 
-Mensagens comuns:
-  traction: zone shared memory ready          - OK, zone inicializada
-  traction: worker attached to shared memory  - OK, worker conectado
-  traction: unknown traction zone             - ERRO, zone não declarada
-  traction: shared memory unavailable         - WARN, fail-open ativo
+Common messages:
+  traction: zone shared memory ready          - OK, zone initialized
+  traction: worker attached to shared memory  - OK, worker attached
+  traction: unknown traction zone             - ERROR, zone not declared
+  traction: shared memory unavailable         - WARN, fail-open active
 
 Debug:
   ./configure --with-debug --add-dynamic-module=...
   error_log /var/log/nginx/error.log debug;
 
 
-14. LIMITAÇÕES CONHECIDAS (ALPHA)
----------------------------------
+14. KNOWN LIMITATIONS (ALPHA)
+----------------------------
 
-  - Métricas baseadas apenas em status HTTP (sem timeout explícito como
-    erro, salvo 504 Gateway Timeout).
-  - Reset de bucket por epoch tem janela de corrida mínima entre workers
-    (aceitável para métricas agregadas).
-  - Endpoint de status expõe métricas sem autenticação própria.
-  - Fail-open quando SHM indisponível (configurável apenas por código).
-  - Janela máxima: 3600 segundos (TRACTION_WINDOW_MAX).
+  - Metrics are based only on HTTP status (no explicit timeout treated as
+    error, except 504 Gateway Timeout).
+  - Bucket reset by epoch has a small race window across workers
+    (acceptable for aggregated metrics).
+  - The status endpoint exposes metrics without built-in authentication.
+  - Fail-open when SHM is unavailable (configurable only in code).
+  - Maximum window: 3600 seconds (TRACTION_WINDOW_MAX).
 
 
-15. HISTÓRICO DE EVOLUÇÃO
--------------------------
+15. CHANGE HISTORY
+------------------
 
-  v0.1 (alpha inicial)
-    - Score global, janela fixa 60s, sem registro de erros.
+  v0.1 (initial alpha)
+    - Global score, fixed 60s window, no error recording.
 
   v0.2 (alpha)
-    - Zones nomeadas com SHM isolada por serviço.
-    - Janela dinâmica 1-3600s.
-    - Registro de erros na fase LOG.
-    - Threshold warning com headers X-Traction-*.
-    - Endpoint traction_status.
-    - Diretivas completas de configuração.
+    - Named zones with service-isolated SHM.
+    - Dynamic window 1-3600s.
+    - Error recording in LOG phase.
+    - Warning threshold with X-Traction-* headers.
+    - traction_status endpoint.
+    - Full configuration directives.
 
-  v0.3 (alpha atual)
+  v0.3 (current alpha)
     - traction_warning_action: headers, off, rate_limit=N%.
-    - Shed parcial em warning via contador atômico (shed_counter).
-    - Status endpoint reporta warning_action e reject rate.
+    - Partial shed in warning via atomic counter (shed_counter).
+    - Status endpoint reports warning_action and reject rate.
 
 ================================================================================
- FIM DO DOCUMENTO
+ END OF DOCUMENT
 ================================================================================

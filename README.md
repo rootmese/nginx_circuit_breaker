@@ -1,109 +1,109 @@
 # Traction Control Module for NGINX
 
-Módulo dinâmico para NGINX que implementa **controle adaptativo de tráfego baseado em taxa de erros**, protegendo serviços upstream contra sobrecarga, degradação progressiva e falhas em cascata.
+Dynamic module for NGINX that implements **adaptive traffic control based on error rate**, protecting upstream services from overload, progressive degradation, and cascading failures.
 
 ---
 
-## Visão Geral
+## Overview
 
-O módulo monitora a saúde operacional do tráfego HTTP observando a taxa de erros em uma **janela temporal deslizante** (*sliding window*), com métricas **isoladas por zone** (serviço/upstream).
+The module monitors HTTP traffic health by tracking error rate in a **sliding time window**, with **per-zone isolated metrics** (service/upstream).
 
-Conforme a degradação aumenta, o módulo aplica ações progressivas:
+As degradation increases, the module applies progressive actions:
 
-| Estado | Comportamento |
-|--------|---------------|
-| **Normal** | Tráfego liberado |
-| **Warning** | Configurável: headers, rate limit parcial ou off (ver `traction_warning_action`) |
+| State | Behavior |
+|-------|----------|
+| **Normal** | Traffic allowed |
+| **Warning** | Configurable: headers, partial rate limit, or off (see `traction_warning_action`) |
 | **Critical** | HTTP 429 (Too Many Requests) |
 | **Emergency** | HTTP 503 (Service Unavailable) |
 
 ---
 
-## Principais Características
+## Key Features
 
-- Operações atômicas (*lock-free*) nos contadores
-- Memória compartilhada entre workers do NGINX
-- **Zones nomeadas** com métricas independentes por serviço
-- Janela temporal configurável de **1 a 3600 segundos**
-- Sliding window com buckets rotativos e reset por epoch
-- Thresholds configuráveis por `http`, `server` ou `location`
-- Endpoint de monitoramento (`traction_status`)
-- Ação configurável em **warning** (`headers`, `rate_limit`, `off`)
-- Baixo overhead computacional
-- Integração nativa com o ciclo de fases do NGINX
+- Atomic (*lock-free*) counters
+- Shared memory across NGINX workers
+- **Named zones** with independent metrics per service
+- Configurable time window from **1 to 3600 seconds**
+- Sliding window with rotating buckets and epoch reset
+- Thresholds configurable at `http`, `server`, or `location`
+- Monitoring endpoint (`traction_status`)
+- Configurable warning action (`headers`, `rate_limit`, `off`)
+- Low computational overhead
+- Native integration with NGINX phase cycle
 
 ---
 
-## Como Funciona
+## How It Works
 
-### Coleta de Métricas
+### Metrics Collection
 
-Métricas são registradas na fase **LOG**, somente para requisições que passaram pelo upstream (`proxy_pass`, etc.):
+Metrics are recorded in the **LOG** phase only for requests that reached an upstream (`proxy_pass`, etc.):
 
-- **Request** — incrementado para cada resposta upstream
-- **Error** — incrementado em respostas 5xx, 502 e 504
+- **Request** — incremented for every upstream response
+- **Error** — incremented for 5xx responses, 502, and 504
 
-Requisições bloqueadas pelo próprio módulo (429/503) **não** entram nas métricas.
+Requests blocked by the module itself (429/503) are **not** included in metrics.
 
 ### Sliding Window
 
-Cada zone aloca buckets proporcionais à janela configurada:
+Each zone allocates buckets proportional to the configured window:
 
 ```text
 bucket_index = current_second % window
 ```
 
-Buckets expirados são ignorados no cálculo. Quando o segundo muda, o bucket correspondente é resetado automaticamente.
+Expired buckets are ignored in the calculation. When the second changes, the corresponding bucket is automatically reset.
 
-### Cálculo do Score
+### Score Calculation
 
 ```text
 Score = 100 - ((Errors / Requests) * 100)
 ```
 
-Se não houver requests na janela, o score assume **100** (saudável).
+If there are no requests in the window, the score defaults to **100** (healthy).
 
-### Motor de Decisão
+### Decision Engine
 
-| Score | Estado | Ação |
-|-------|--------|------|
-| ≥ warning (padrão: 80) | Normal | Continua o fluxo |
-| ≥ critical (padrão: 50) | Warning | Depende de `traction_warning_action` (ver abaixo) |
-| ≥ emergency (padrão: 20) | Critical | HTTP 429 + `Retry-After` |
-| < emergency (padrão: 20) | Emergency | HTTP 503 + `Retry-After` |
+| Score | State | Action |
+|-------|-------|--------|
+| ≥ warning (default: 80) | Normal | Continue processing |
+| ≥ critical (default: 50) | Warning | Depends on `traction_warning_action` (see below) |
+| ≥ emergency (default: 20) | Critical | HTTP 429 + `Retry-After` |
+| < emergency (default: 20) | Emergency | HTTP 503 + `Retry-After` |
 
-Thresholds devem satisfazer: `emergency < critical < warning`.
+Thresholds must satisfy: `emergency < critical < warning`.
 
-### Ação em Warning (`traction_warning_action`)
+### Warning Action (`traction_warning_action`)
 
-| Valor | Comportamento |
-|-------|---------------|
-| `headers` (padrão) | Tráfego liberado + headers `X-Traction-*` + log WARN |
-| `rate_limit=N%` | Rejeita **N%** das requisições com HTTP 429; as demais passam com headers `X-Traction-*` |
-| `off` | Nenhuma ação — tráfego 100% liberado até atingir critical |
+| Value | Behavior |
+|-------|----------|
+| `headers` (default) | Traffic allowed + `X-Traction-*` headers + WARN log |
+| `rate_limit=N%` | Reject **N%** of requests with HTTP 429; the rest pass with `X-Traction-*` headers |
+| `off` | No action — 100% traffic allowed until critical is reached |
 
-O rate limit usa contador atômico na shared memory da zone, distribuindo o shed entre workers de forma uniforme.
+The rate limit uses an atomic counter in the zone shared memory, distributing the shed evenly across workers.
 
 ```nginx
 location /api {
     traction_control zone=backend;
-    traction_warning_action rate_limit=30%;   # derruba 30% em warning
+    traction_warning_action rate_limit=30%;   # drop 30% in warning
     proxy_pass http://upstream;
 }
 ```
 
 ---
 
-## Instalação
+## Installation
 
-Compilar como módulo dinâmico:
+Build as a dynamic module:
 
 ```bash
-./configure --add-dynamic-module=/caminho/para/nginx_circuit_breaker
+./configure --add-dynamic-module=/path/to/nginx_circuit_breaker
 make modules
 ```
 
-Carregar no `nginx.conf`:
+Load it in `nginx.conf`:
 
 ```nginx
 load_module modules/ngx_http_traction_control_module.so;
@@ -111,11 +111,9 @@ load_module modules/ngx_http_traction_control_module.so;
 
 ---
 
----
+## Configuration
 
-## Configuração
-
-### Exemplo completo
+### Complete Example
 
 ```nginx
 http {
@@ -149,21 +147,21 @@ http {
 }
 ```
 
-### Diretivas
+### Directives
 
-| Diretiva | Contexto | Descrição |
-|----------|----------|-----------|
-| `traction_zone name size [window=N]` | `http` | Declara uma zone de métricas (janela 1–3600 s, padrão 60) |
-| `traction_control on \| off \| zone=name` | `http`, `server`, `location` | Ativa o controle e associa uma zone |
-| `traction_status zone=name` | `server`, `location` | Habilita endpoint de status para a zone |
-| `traction_warning_threshold N` | `http`, `server`, `location` | Limite de warning (padrão: 80) |
-| `traction_critical_threshold N` | `http`, `server`, `location` | Limite de critical / 429 (padrão: 50) |
-| `traction_emergency_threshold N` | `http`, `server`, `location` | Limite de emergency / 503 (padrão: 20) |
-| `traction_warning_action headers \| off \| rate_limit=N%` | `http`, `server`, `location` | Ação no estado warning (padrão: `headers`) |
+| Directive | Context | Description |
+|-----------|---------|-------------|
+| `traction_zone name size [window=N]` | `http` | Declares a metrics zone (1–3600s window, default 60) |
+| `traction_control on \| off \| zone=name` | `http`, `server`, `location` | Enables control and associates a zone |
+| `traction_status zone=name` | `server`, `location` | Enables the status endpoint for the zone |
+| `traction_warning_threshold N` | `http`, `server`, `location` | Warning threshold (default: 80) |
+| `traction_critical_threshold N` | `http`, `server`, `location` | Critical threshold / 429 (default: 50) |
+| `traction_emergency_threshold N` | `http`, `server`, `location` | Emergency threshold / 503 (default: 20) |
+| `traction_warning_action headers \| off \| rate_limit=N%` | `http`, `server`, `location` | Action on warning state (default: `headers`) |
 
-### Endpoint de status
+### Status Endpoint
 
-Com `traction_status zone=name` em um `location`, uma requisição GET retorna:
+With `traction_status zone=name` in a `location`, a GET request returns:
 
 ```text
 Traction Status
@@ -180,52 +178,52 @@ warning_action: rate_limit
 warning_reject_rate: 30%
 ```
 
-Proteja o endpoint com `allow`/`deny` ou autenticação — ele expõe métricas operacionais.
+Protect the endpoint with `allow`/`deny` or authentication — it exposes operational metrics.
 
 ---
 
-## Arquitetura
+## Architecture
 
 ```text
 NGINX Worker
- ├── traction_zone (shared memory por serviço)
+ ├── traction_zone (shared memory per service)
  │    └── buckets[window]  (requests, errors, epoch)
- ├── PREACCESS phase  → traction_handler   (decisão: permitir/bloquear)
- ├── LOG phase        → traction_log_handler (coleta de métricas)
- ├── HEADER filter    → traction_header_filter (headers em warning)
- └── CONTENT phase    → traction_status (monitoramento)
+ ├── PREACCESS phase  → traction_handler   (decision: allow/deny)
+ ├── LOG phase        → traction_log_handler (metrics collection)
+ ├── HEADER filter    → traction_header_filter (warning headers)
+ └── CONTENT phase    → traction_status (monitoring)
 ```
 
 ---
 
-## Estrutura do Projeto
+## Project Structure
 
 ```text
 nginx_circuit_breaker/
- ├── config                              # Script de build do módulo NGINX
- ├── ngx_http_traction_control_module.c  # Módulo principal + diretivas
- ├── traction_handler.c                  # Handlers PREACCESS e LOG
- ├── traction_header_filter.c            # Headers X-Traction-* em warning
- ├── traction_status.c                   # Endpoint de monitoramento
- ├── traction_shared_memory.c/h          # Zones e shared memory
- ├── traction_metrics.c/h                # Registro de requests/erros
- ├── traction_score.c/h                  # Cálculo de score e stats
- ├── traction_decision.c/h               # Decisão 429/503
- ├── traction_state.c/h                  # Máquina de estados
- ├── traction_warning.c/h                # Ação configurável em warning
- └── traction_config.c/h                 # Configuração por location
+ ├── config                              # NGINX module build script
+ ├── ngx_http_traction_control_module.c  # Main module + directives
+ ├── traction_handler.c                  # PREACCESS and LOG handlers
+ ├── traction_header_filter.c            # X-Traction-* headers in warning
+ ├── traction_status.c                   # Monitoring endpoint
+ ├── traction_shared_memory.c/h          # Zones and shared memory
+ ├── traction_metrics.c/h                # Request/error recording
+ ├── traction_score.c/h                  # Score and stats calculation
+ ├── traction_decision.c/h               # 429/503 decision logic
+ ├── traction_state.c/h                  # State machine
+ ├── traction_warning.c/h                # Configurable warning action
+ └── traction_config.c/h                 # Location configuration
 ```
 
 ---
 
-## Status do Projeto
+## Project Status
 
 **Alpha**
 
-Funcional para validação de arquitetura e testes em ambientes controlados. Não recomendado para produção sem testes de carga e observabilidade adequados.
+Functional for architecture validation and controlled environment testing. Not recommended for production without adequate load testing and observability.
 
 ---
 
-## Detalhamento Técnico
+## Technical Details
 
-Consulte [README.txt](README.txt) para referência completa de diretivas, fluxo interno, memória compartilhada e notas de implementação.
+See [README.txt](README.txt) for full reference on directives, internal flow, shared memory, and implementation notes.
