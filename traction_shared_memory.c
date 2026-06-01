@@ -1,5 +1,6 @@
 #include "traction_shared_memory.h"
 #include "traction_config.h"
+#include "traction_state.h"
 
 extern ngx_module_t  ngx_http_traction_control_module;
 
@@ -26,6 +27,7 @@ traction_zone_init(ngx_shm_zone_t *shm_zone, void *data)
 
     ngx_memzero(shm, size);
     shm->window = conf->window;
+    shm->last_state = TRACTION_STATE_NORMAL;
     shm_zone->data = shm;
 
     ngx_log_error(NGX_LOG_NOTICE, shm_zone->shm.log, 0,

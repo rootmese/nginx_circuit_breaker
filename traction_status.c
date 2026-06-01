@@ -6,6 +6,7 @@
 
 extern ngx_module_t  ngx_http_traction_control_module;
 
+static ngx_flag_t traction_status_is_local_request(ngx_http_request_t *r);
 static ngx_int_t  traction_status_content_handler(ngx_http_request_t *r);
 
 static ngx_int_t
@@ -36,6 +37,12 @@ traction_status_content_handler(ngx_http_request_t *r)
 
     if (zone->shm == NULL) {
         return NGX_HTTP_SERVICE_UNAVAILABLE;
+    }
+
+    if (!traction_status_is_local_request(r)) {
+        ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                      "traction: status endpoint served to non-local client; "
+                      "protect this location with allow/deny");
     }
 
     stats = traction_calculate_stats(zone->shm);
@@ -109,6 +116,32 @@ traction_status_content_handler(ngx_http_request_t *r)
     }
 
     return ngx_http_output_filter(r, &out);
+}
+
+static ngx_flag_t
+traction_status_is_local_request(ngx_http_request_t *r)
+{
+    struct sockaddr  *sa;
+
+    if (r == NULL || r->connection == NULL || r->connection->sockaddr == NULL) {
+        return 0;
+    }
+
+    sa = r->connection->sockaddr;
+
+    if (sa->sa_family == AF_INET) {
+        struct sockaddr_in  *sin = (struct sockaddr_in *) sa;
+        return sin->sin_addr.s_addr == htonl(INADDR_LOOPBACK);
+    }
+
+#if (NGX_HAVE_INET6)
+    if (sa->sa_family == AF_INET6) {
+        struct sockaddr_in6  *sin6 = (struct sockaddr_in6 *) sa;
+        return IN6_ARE_ADDR_EQUAL(&sin6->sin6_addr, &in6addr_loopback);
+    }
+#endif
+
+    return 0;
 }
 
 ngx_int_t

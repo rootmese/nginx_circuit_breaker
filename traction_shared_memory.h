@@ -17,6 +17,7 @@ typedef struct {
 typedef struct {
     ngx_uint_t         window;
     ngx_atomic_t       shed_counter;
+    ngx_atomic_t       last_state;
     traction_bucket_t  buckets[1];
 } traction_zone_shm_t;
 
