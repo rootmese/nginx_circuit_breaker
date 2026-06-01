@@ -111,6 +111,8 @@ load_module modules/ngx_http_traction_control_module.so;
 
 ---
 
+---
+
 ## Configuração
 
 ### Exemplo completo

@@ -199,14 +199,14 @@ Métodos aceitos: GET, HEAD
 Resposta Content-Type: text/plain
 
 Campos:
-  zone          - nome da zone
-  window        - janela em segundos
-  score         - score atual
-  requests      - total na janela
-  errors        - total na janela
-  error_rate    - percentual de erros
-  state         - normal | warning | critical | emergency
-  thresholds    - valores configurados no location
+  zone                  - nome da zone
+  window                - janela em segundos
+  score                 - score atual
+  requests              - total na janela
+  errors                - total na janela
+  error_rate            - percentual de erros
+  state                 - normal | warning | critical | emergency
+  thresholds            - valores configurados no location
   warning_action        - headers | off | rate_limit
   warning_reject_rate   - percentual N (0 se não rate_limit)
 
@@ -221,7 +221,7 @@ Nome interno da zona SHM: traction_zone_<nome>
 
 Inicialização:
   - traction_zone_register() em postconfiguration (por zone)
-  - traction_shm_init_zone() callback no primeiro ciclo
+  - traction_zone_init() callback no primeiro ciclo
   - traction_zones_setup() em init_process de cada worker
 
 Reload (SIGHUP):
@@ -350,7 +350,27 @@ http {
 }
 
 
-13. LIMITAÇÕES CONHECIDAS (ALPHA)
+13. TROUBLESHOOTING
+-------------------
+
+Verificar se o módulo carregou:
+  nginx -V 2>&1 | grep traction
+
+Logs:
+  tail -f /var/log/nginx/error.log | grep traction
+
+Mensagens comuns:
+  traction: zone shared memory ready          - OK, zone inicializada
+  traction: worker attached to shared memory  - OK, worker conectado
+  traction: unknown traction zone             - ERRO, zone não declarada
+  traction: shared memory unavailable         - WARN, fail-open ativo
+
+Debug:
+  ./configure --with-debug --add-dynamic-module=...
+  error_log /var/log/nginx/error.log debug;
+
+
+14. LIMITAÇÕES CONHECIDAS (ALPHA)
 ---------------------------------
 
   - Métricas baseadas apenas em status HTTP (sem timeout explícito como
@@ -362,7 +382,7 @@ http {
   - Janela máxima: 3600 segundos (TRACTION_WINDOW_MAX).
 
 
-14. HISTÓRICO DE EVOLUÇÃO
+15. HISTÓRICO DE EVOLUÇÃO
 -------------------------
 
   v0.1 (alpha inicial)
