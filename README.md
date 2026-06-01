@@ -4,24 +4,6 @@ Módulo dinâmico para NGINX que implementa **controle adaptativo de tráfego ba
 
 ---
 
-# Índice
-
-- [Visão Geral](#visão-geral)
-- [Como Funciona](#como-funciona)
-- [Arquitetura](#arquitetura)
-- [Memória Compartilhada](#memória-compartilhada)
-- [Compilação](#compilação)
-- [Configuração](#configuração)
-- [Exemplos](#exemplos)
-- [API para Desenvolvedores](#api-para-desenvolvedores)
-- [Limitações](#limitações)
-- [Roadmap](#roadmap)
-- [Troubleshooting](#troubleshooting)
-- [Contribuição](#contribuição)
-- [Licença](#licença)
-
----
-
 # Visão Geral
 
 O módulo monitora continuamente a saúde operacional do tráfego HTTP por meio da observação da taxa de erros em uma janela temporal deslizante (*sliding window*).
