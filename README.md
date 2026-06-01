@@ -68,6 +68,6 @@ Não recomendado para ambientes de produção neste estágio. O foco atual está
 
 ---
 
-#Detalhamento Técnico
+# Detalhamento Técnico
 
 Ver arquivo README.txt
