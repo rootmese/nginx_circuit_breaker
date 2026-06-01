@@ -5,30 +5,31 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
-#define TRACTION_BUCKETS_DEFAULT 60
-#define TRACTION_SHM_NAME "traction_shm"
+#define TRACTION_WINDOW_MAX      3600
+#define TRACTION_WINDOW_DEFAULT  60
 
 typedef struct {
-    ngx_atomic_t requests;
-    ngx_atomic_t errors;
+    ngx_atomic_t  requests;
+    ngx_atomic_t  errors;
+    ngx_uint_t    epoch;
 } traction_bucket_t;
 
 typedef struct {
-    traction_bucket_t buckets[TRACTION_BUCKETS_DEFAULT];
-    ngx_uint_t last_rotate;      // Último timestamp de rotação
-    ngx_uint_t bucket_count;     // Número real de buckets
-} traction_shared_t;
+    ngx_uint_t         window;
+    ngx_atomic_t       shed_counter;
+    traction_bucket_t  buckets[1];
+} traction_zone_shm_t;
 
-// Ponteiro global para memória compartilhada
-extern traction_shared_t *traction_shm;
+typedef struct {
+    ngx_uint_t  window;
+} traction_zone_conf_t;
 
-// Inicializa a zona de memória compartilhada
-ngx_int_t traction_init_shm(ngx_conf_t *cf);
+#define traction_zone_shm_size(window) \
+    (offsetof(traction_zone_shm_t, buckets) \
+     + (window) * sizeof(traction_bucket_t))
 
-// Callback chamado quando a zona é alocada/inicializada
-void *traction_shm_alloc(ngx_shm_zone_t *shm_zone, void *data);
-
-// Obtém o ponteiro para memória compartilhada no ciclo atual
-ngx_int_t traction_shm_init_cycle(ngx_cycle_t *cycle);
+ngx_int_t  traction_zone_register(ngx_conf_t *cf,
+                                  ngx_http_traction_zone_t *zone, size_t size);
+ngx_int_t  traction_zones_setup(ngx_cycle_t *cycle);
 
 #endif

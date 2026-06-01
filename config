@@ -1,0 +1,17 @@
+ngx_addon_name=ngx_http_traction_control_module
+ngx_module_type=HTTP
+ngx_module_libs=
+
+ngx_module_srcs="$ngx_addon_dir/ngx_http_traction_control_module.c \
+                 $ngx_addon_dir/traction_handler.c \
+                 $ngx_addon_dir/traction_shared_memory.c \
+                 $ngx_addon_dir/traction_metrics.c \
+                 $ngx_addon_dir/traction_score.c \
+                 $ngx_addon_dir/traction_decision.c \
+                 $ngx_addon_dir/traction_config.c \
+                 $ngx_addon_dir/traction_state.c \
+                 $ngx_addon_dir/traction_warning.c \
+                 $ngx_addon_dir/traction_header_filter.c \
+                 $ngx_addon_dir/traction_status.c"
+
+. auto/module
