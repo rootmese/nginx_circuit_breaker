@@ -5,6 +5,8 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+#define TRACTION_VERSION "0.1.0-beta"
+
 typedef struct ngx_http_traction_zone_s {
     ngx_str_t               name;
     ngx_shm_zone_t         *shm_zone;

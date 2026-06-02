@@ -221,12 +221,26 @@ nginx_circuit_breaker/
 
 ## Project Status
 
-**Alpha**
+**Beta**
 
-Functional for architecture validation and controlled environment testing. Not recommended for production without adequate load testing and observability.
+Current version: 0.1.0-beta — suitable for wider testing in staging environments. See [CHANGELOG.md](CHANGELOG.md) for details. Not recommended for production without adequate load testing and observability.
 
 ---
 
 ## Technical Details
 
 See [README.txt](README.txt) for full reference on directives, internal flow, shared memory, and implementation notes.
+
+---
+
+## License
+
+This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+See the [LICENSE](LICENSE) file for the full text. Replace the copyright holder and year
+in `LICENSE` with the appropriate values for your project if desired.
+
+---
+
+## Support
+
+For questions or support, contact: agsilveira.7@gmail.com
