@@ -96,6 +96,9 @@ location /api {
 
 ## Installation
 
+This repository does not include a `Makefile` or its own `configure` script.
+You must build the module from the NGINX source tree using NGINX's configure system.
+
 Build as a dynamic module:
 
 ```bash

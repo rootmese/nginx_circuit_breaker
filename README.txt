@@ -238,6 +238,9 @@ Prerequisites:
   - NGINX source tree matching the target version
   - Standard C toolchain
 
+Note: this repository does not include a `Makefile` or `configure` script.
+Build the module from within the NGINX source tree using NGINX's build system.
+
 Dynamic module:
   ./configure --add-dynamic-module=/path/to/nginx_circuit_breaker
   make modules
