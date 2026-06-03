@@ -64,9 +64,9 @@ traction_header_filter(ngx_http_request_t *r)
     }
 
     stats = traction_calculate_stats(conf->zone->shm);
-    state = traction_get_state(conf, stats.score);
+    state = traction_get_state(conf, stats.score, conf->zone->shm);
 
-    if (state != TRACTION_STATE_WARNING
+    if ((state != TRACTION_STATE_WARNING && state != TRACTION_STATE_RECOVERY)
         || !traction_warning_emit_headers(conf))
     {
         return ngx_http_next_header_filter(r);
@@ -74,7 +74,8 @@ traction_header_filter(ngx_http_request_t *r)
 
     if (traction_push_header(r, (u_char *) "X-Traction-State",
                              sizeof("X-Traction-State") - 1,
-                             (u_char *) "warning", sizeof("warning") - 1)
+                             (u_char *) (state == TRACTION_STATE_RECOVERY ? "recovery" : "warning"),
+                             (u_char *) (state == TRACTION_STATE_RECOVERY ? "recovery" : "warning") ? (sizeof("recovery") - 1) : (sizeof("warning") - 1))
         != NGX_OK)
     {
         return NGX_ERROR;

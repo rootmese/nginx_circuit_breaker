@@ -32,13 +32,59 @@ traction_log_state_transition(ngx_http_request_t *r,
     }
 }
 
+static ngx_uint_t
+traction_recovery_allow_rate(ngx_http_traction_loc_conf_t *conf,
+                             double score)
+{
+    ngx_uint_t  range;
+    double      relative;
+
+    if (conf->critical_threshold <= conf->emergency_threshold) {
+        return 50;
+    }
+
+    range = conf->critical_threshold - conf->emergency_threshold;
+    relative = (score - (double) conf->emergency_threshold) /
+               (double) range;
+
+    if (relative < 0.33) {
+        return 10;
+    }
+
+    if (relative < 0.66) {
+        return 20;
+    }
+
+    return 50;
+}
+
+static ngx_flag_t
+traction_recovery_should_shed(ngx_http_traction_loc_conf_t *conf,
+    traction_zone_shm_t *shm, double score)
+{
+    ngx_uint_t  n;
+    ngx_uint_t  allow_rate;
+
+    if (shm == NULL) {
+        return 0;
+    }
+
+    allow_rate = traction_recovery_allow_rate(conf, score);
+    n = (ngx_uint_t) ngx_atomic_fetch_add(&shm->shed_counter, 1);
+
+    return (n % 100) >= allow_rate;
+}
+
 ngx_int_t
 traction_decide(ngx_http_request_t *r, ngx_http_traction_loc_conf_t *conf,
                 double score)
 {
     traction_state_e  state;
+    traction_zone_shm_t *shm;
+    ngx_uint_t allow_rate;
 
-    state = traction_get_state(conf, score);
+    shm = conf->zone != NULL ? conf->zone->shm : NULL;
+    state = traction_get_state(conf, score, shm);
     traction_log_state_transition(r, conf, state, score);
 
     if (state == TRACTION_STATE_EMERGENCY) {
@@ -47,6 +93,25 @@ traction_decide(ngx_http_request_t *r, ngx_http_traction_loc_conf_t *conf,
         }
 
         return NGX_HTTP_SERVICE_UNAVAILABLE;
+    }
+
+    if (state == TRACTION_STATE_RECOVERY) {
+        if (conf->zone != NULL
+            && conf->zone->shm != NULL
+            && traction_recovery_should_shed(conf, conf->zone->shm, score))
+        {
+            allow_rate = traction_recovery_allow_rate(conf, score);
+            r->headers_out.retry_after = ngx_time() + 1;
+
+            ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
+                          "traction: zone \"%V\" recovery shed "
+                          "(score=%.2f, allow=%ui%%)",
+                          &conf->zone->name, score, allow_rate);
+
+            return NGX_HTTP_TOO_MANY_REQUESTS;
+        }
+
+        return NGX_DECLINED;
     }
 
     if (state == TRACTION_STATE_CRITICAL) {
