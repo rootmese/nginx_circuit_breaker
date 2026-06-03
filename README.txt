@@ -11,6 +11,32 @@ based on HTTP error rate observed in a sliding time window.
 Goal: reduce pressure on degraded upstreams before abrupt collapses by applying
 progressive degradation (warning → 429 → 503).
 
+1.1 DESIGN PHILOSOPHY
+---------------------
+
+Traditional circuit breakers typically operate as binary systems:
+traffic is either allowed or blocked. While simple, abrupt state
+changes can create oscillation, traffic spikes during recovery,
+and repeated service instability.
+
+Traction Control follows a different approach inspired by the
+control philosophy used in Formula 1, particularly the McLaren
+MP4-20. Rather than applying sudden transitions, power delivery
+is adjusted progressively to maintain vehicle stability when grip
+conditions deteriorate.
+
+The same principle is applied to HTTP traffic.
+
+As upstream health degrades, the module progressively increases
+intervention levels (warning → critical → emergency). When the
+service recovers, traffic is not immediately restored to 100%.
+Instead, requests are gradually reintroduced through a dedicated
+recovery phase, reducing the risk of instability and repeated
+failure cycles.
+
+The objective is not simply to stop traffic, but to maintain
+system stability under adverse conditions while allowing a
+controlled return to normal operation.
 
 2. ZONE MODEL
 -------------
@@ -176,12 +202,84 @@ Additional fields in zone SHM:
   score >= emergency_threshold      -> TRACTION_STATE_CRITICAL
   score <  emergency_threshold      -> TRACTION_STATE_EMERGENCY
 
-  Actions:
-  NORMAL    - no intervention
-  WARNING   - depends on traction_warning_action (see section 6.1)
-  CRITICAL  - HTTP 429 (100% blocked)
-  EMERGENCY - HTTP 503 (100% blocked)
 
+  Recovery Transition:
+
+  If the previous state was EMERGENCY or RECOVERY and the score
+  rises above emergency_threshold but remains below
+  critical_threshold, the state becomes:
+
+      TRACTION_STATE_RECOVERY
+
+
+  State Flow:
+
+      NORMAL
+         |
+         v
+      WARNING
+         |
+         v
+      CRITICAL
+         |
+         v
+      EMERGENCY
+         |
+         v
+      RECOVERY
+         |
+         +----------------+
+         |                |
+         v                v
+      WARNING          NORMAL
+
+
+  Actions:
+
+  NORMAL
+      - no intervention
+
+  WARNING
+      - depends on traction_warning_action
+        (see section 6.1)
+
+  CRITICAL
+      - HTTP 429 (Too Many Requests)
+      - 100% of requests rejected
+
+  EMERGENCY
+      - HTTP 503 (Service Unavailable)
+      - 100% of requests rejected
+
+  RECOVERY
+      - gradual traffic restoration
+      - requests are partially allowed based on
+        recovery progress
+      - traffic release levels:
+
+            10% allowed
+            20% allowed
+            50% allowed
+
+      - remaining requests receive HTTP 429
+
+
+  Notes:
+
+  RECOVERY is entered only after an EMERGENCY state.
+
+  While in RECOVERY, traffic is progressively restored
+  as the score improves.
+
+  RECOVERY remains active while the score is between
+  emergency_threshold and critical_threshold.
+
+  If the score rises above warning_threshold, the state
+  returns directly to NORMAL.
+
+  The RECOVERY state prevents oscillation between
+  EMERGENCY and NORMAL by progressively reintroducing
+  traffic as service health improves.
 
 6.1 WARNING ACTION (traction_warning_action)
 -------------------------------------------
@@ -396,7 +494,7 @@ Debug:
   error_log /var/log/nginx/error.log debug;
 
 
-14. KNOWN LIMITATIONS (ALPHA)
+14. KNOWN LIMITATIONS (BETHA)
 ----------------------------
 
   - Metrics are based only on HTTP status (no explicit timeout treated as
@@ -426,6 +524,13 @@ Debug:
     - traction_warning_action: headers, off, rate_limit=N%.
     - Partial shed in warning via atomic counter (shed_counter).
     - Status endpoint reports warning_action and reject rate.
+
+  v0.4 (beta)
+
+  - Recovery state introduced.
+  - Progressive traffic restoration.
+  - Recovery state reporting.
+  - Recovery response headers.
 
   ================================================================================
 

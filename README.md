@@ -16,6 +16,7 @@ As degradation increases, the module applies progressive actions:
 | **Warning** | Configurable: headers, partial rate limit, or off (see `traction_warning_action`) |
 | **Critical** | HTTP 429 (Too Many Requests) |
 | **Emergency** | HTTP 503 (Service Unavailable) |
+| **Recovery** | Gradual traffic restoration (10%, 20%, 50%) |
 
 ---
 
