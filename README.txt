@@ -170,7 +170,7 @@ You can keep tuning settings in a dedicated file and include it from `nginx.conf
 Bucket structure:
   requests  (ngx_atomic_t) - request counter
   errors    (ngx_atomic_t) - error counter
-  epoch     (ngx_uint_t)   - wall-clock second of last write
+  epoch     (ngx_atomic_t) - bucket timestamp (Unix second)
 
 Active bucket index:
   idx = current_unix_time % window
@@ -189,8 +189,15 @@ Memory per zone:
   sizeof(traction_zone_shm_t) + window * sizeof(traction_bucket_t)
 
 Additional fields in zone SHM:
-  shed_counter (ngx_atomic_t) - counter for rate_limit in warning
 
+  shed_counter (ngx_atomic_t)
+      Atomic counter used by warning rate_limit=N%
+      to distribute request shedding across workers.
+
+  last_state (ngx_atomic_t)
+      Stores the previous global state of the zone.
+      Used by the recovery state machine to detect
+      transitions from EMERGENCY to RECOVERY.
 
 6. STATE MACHINE
 ----------------

@@ -6,7 +6,12 @@ Dynamic module for NGINX that implements **adaptive traffic control based on err
 
 ## Overview
 
-The module monitors HTTP traffic health by tracking error rate in a **sliding time window**, with **per-zone isolated metrics** (service/upstream).
+# The module monitors HTTP traffic health by tracking error rate in a **sliding time window**, with **per-zone isolated metrics** (service/upstream).
+
+## Updated Implementation
+
+The latest version refactors the HTTP handling logic by introducing a **single generic callback** `http_callback`. Both status queries (`fetch_status`) and test requests (`make_request`) now invoke this callback with a `purpose` argument (`status` or `request`). This reduces code duplication, centralizes error handling, and ensures consistent logging and request scheduling.
+
 
 As degradation increases, the module applies progressive actions:
 
@@ -255,7 +260,7 @@ nginx_circuit_breaker/
 
 **Beta**
 
-Current version: 0.1.0-beta — suitable for wider testing in staging environments. See [CHANGELOG.md](CHANGELOG.md) for details. Not recommended for production without adequate load testing and observability.
+Current version: 0.4.0-beta — suitable for wider testing in staging environments. See [CHANGELOG.md](CHANGELOG.md) for details. Not recommended for production without adequate load testing and observability.
 
 ---
 
@@ -267,7 +272,7 @@ See [README.txt](README.txt) for full reference on directives, internal flow, sh
 
 ## License
 
-This project is licensed under the **GNU General Public License v3.0 (GPL-3.0)**.
+This project is licensed under the **GNU Lesser General Public License v3.0 (LGPL-3.0)**.
 See the [LICENSE](LICENSE) file for the full text. Replace the copyright holder and year
 in `LICENSE` with the appropriate values for your project if desired.
 
