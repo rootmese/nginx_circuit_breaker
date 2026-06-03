@@ -11,7 +11,7 @@
 typedef struct {
     ngx_atomic_t  requests;
     ngx_atomic_t  errors;
-    ngx_uint_t    epoch;
+    ngx_atomic_t  epoch;
 } traction_bucket_t;
 
 typedef struct {

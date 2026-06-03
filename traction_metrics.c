@@ -5,16 +5,20 @@ traction_current_bucket(traction_zone_shm_t *shm, time_t now)
 {
     ngx_uint_t           idx;
     ngx_uint_t           sec;
+    ngx_atomic_t         old_epoch;
     traction_bucket_t   *b;
 
     sec = (ngx_uint_t) now;
     idx = sec % shm->window;
     b = &shm->buckets[idx];
 
-    if (b->epoch != sec) {
-        b->epoch = sec;
-        b->requests = 0;
-        b->errors = 0;
+    old_epoch = ngx_atomic_fetch_add(&b->epoch, 0);
+
+    if ((ngx_uint_t) old_epoch != sec) {
+        if (ngx_atomic_cmp_set(&b->epoch, old_epoch, sec)) {
+            b->requests = 0;
+            b->errors = 0;
+        }
     }
 
     return b;

@@ -82,6 +82,29 @@ traction_warning_action headers | off | rate_limit=N%
                     admitted requests receive X-Traction-* headers
   Range N  : 1 to 99 (only for rate_limit)
 
+3.1 TUNING / NGINX CONFIGURATION
+-------------------------------
+
+This module is tuned via standard NGINX configuration directives. There is no separate token or external tuning file required by the module itself.
+
+Example:
+
+  http {
+      traction_zone api_backend 1m window=60;
+
+      server {
+          location /api {
+              traction_control zone=api_backend;
+              traction_warning_threshold 80;
+              traction_critical_threshold 50;
+              traction_emergency_threshold 20;
+              traction_warning_action rate_limit=30%;
+              proxy_pass http://api_upstream;
+          }
+      }
+  }
+
+You can keep tuning settings in a dedicated file and include it from `nginx.conf` using `include /path/to/traction_tuning.conf;`.
 
 4. REQUEST FLOW
 ---------------

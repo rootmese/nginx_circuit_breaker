@@ -162,6 +162,37 @@ http {
 | `traction_emergency_threshold N` | `http`, `server`, `location` | Emergency threshold / 503 (default: 20) |
 | `traction_warning_action headers \| off \| rate_limit=N%` | `http`, `server`, `location` | Action on warning state (default: `headers`) |
 
+### Tuning and Configuration
+
+This module does not use a separate token or tuning file. All behavior is configured through NGINX directives in `nginx.conf` or in included configuration files.
+
+Example tuning block:
+
+```nginx
+http {
+    traction_zone api_backend 1m window=60;
+
+    server {
+        location /api {
+            traction_control zone=api_backend;
+            traction_warning_threshold 80;
+            traction_critical_threshold 50;
+            traction_emergency_threshold 20;
+            traction_warning_action rate_limit=30%;
+            proxy_pass http://api_upstream;
+        }
+    }
+}
+```
+
+Use `include` directives if you want to keep tuning settings in a separate file, for example:
+
+```nginx
+http {
+    include /etc/nginx/traction_tuning.conf;
+}
+```
+
 ### Status Endpoint
 
 With `traction_status zone=name` in a `location`, a GET request returns:
