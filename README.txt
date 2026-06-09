@@ -538,6 +538,13 @@ Debug:
   - Progressive traffic restoration.
   - Recovery state reporting.
   - Recovery response headers.
+  
+ v0.4.1-beta
+  - Recovery state introduced.
+  - Progressive traffic restoration (10%, 20%, 50%).
+  - Recovery response headers (X-Traction-State: recovery).
+  - Fixed Retry-After header for nginx 1.28+ compatibility.
+  - Proper struct initialization with NGX_MODULE_V1_PADDING.
 
   ================================================================================
 

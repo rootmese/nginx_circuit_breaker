@@ -12,7 +12,6 @@ Dynamic module for NGINX that implements **adaptive traffic control based on err
 
 The latest version refactors the HTTP handling logic by introducing a **single generic callback** `http_callback`. Both status queries (`fetch_status`) and test requests (`make_request`) now invoke this callback with a `purpose` argument (`status` or `request`). This reduces code duplication, centralizes error handling, and ensures consistent logging and request scheduling.
 
-
 As degradation increases, the module applies progressive actions:
 
 | State | Behavior |
