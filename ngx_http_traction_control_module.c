@@ -91,20 +91,22 @@ static ngx_http_module_t  traction_module_ctx = {
     traction_merge_loc_conf        /* merge_loc_conf */
 };
 
-ngx_module_t  ngx_http_traction_control_module = {
+ngx_module_t ngx_http_traction_control_module = {
     NGX_MODULE_V1,
     &traction_module_ctx,
     traction_commands,
     NGX_HTTP_MODULE,
-    NULL,                          /* init_master */
-    traction_init_process,         /* init_process */
-    NULL,                          /* init_thread */
-    NULL,                          /* exit_thread */
-    traction_exit_process,         /* exit_process */
-    NULL,                          /* exit_master */
+
+    NULL,                   /* init_master */
+    NULL,                   /* init_module */
+    traction_init_process,  /* init_process */
+    NULL,                   /* init_thread */
+    NULL,                   /* exit_thread */
+    traction_exit_process,  /* exit_process */
+    NULL,                   /* exit_master */
+
     NGX_MODULE_V1_PADDING
 };
-
 static ngx_int_t
 ngx_http_traction_zone_slot(ngx_conf_t *cf, ngx_str_t *value,
     ngx_http_traction_zone_t **zone_out)

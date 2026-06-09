@@ -5,12 +5,14 @@
 #include <ngx_core.h>
 #include <ngx_http.h>
 
+#include "traction_shared_memory.h"
+
 #define TRACTION_VERSION "0.1.0-beta"
 
 typedef struct ngx_http_traction_zone_s {
     ngx_str_t               name;
     ngx_shm_zone_t         *shm_zone;
-    struct traction_zone_shm_s  *shm;
+    traction_zone_shm_t  *shm;
     ngx_uint_t              window;
 } ngx_http_traction_zone_t;
 

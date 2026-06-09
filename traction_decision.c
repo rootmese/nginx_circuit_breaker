@@ -3,6 +3,34 @@
 #include "traction_state.h"
 #include "traction_warning.h"
 
+static ngx_int_t
+traction_set_retry_after(ngx_http_request_t *r, time_t delay)
+{
+    ngx_table_elt_t  *h;
+    u_char            val[NGX_INT_T_LEN];
+    u_char           *last;
+
+    last = ngx_sprintf(val, "%ui", (ngx_uint_t) delay);
+
+    h = ngx_list_push(&r->headers_out.headers);
+    if (h == NULL) {
+        return NGX_ERROR;
+    }
+
+    h->key.len  = sizeof("Retry-After") - 1;
+    h->key.data = (u_char *) "Retry-After";
+    h->hash     = ngx_hash_key(h->key.data, h->key.len);
+
+    h->value.len  = last - val;
+    h->value.data = ngx_pnalloc(r->pool, h->value.len);
+    if (h->value.data == NULL) {
+        return NGX_ERROR;
+    }
+
+    ngx_memcpy(h->value.data, val, h->value.len);
+    return NGX_OK;
+}
+
 static void
 traction_log_state_transition(ngx_http_request_t *r,
     ngx_http_traction_loc_conf_t *conf, traction_state_e state, double score)
@@ -89,9 +117,8 @@ traction_decide(ngx_http_request_t *r, ngx_http_traction_loc_conf_t *conf,
 
     if (state == TRACTION_STATE_EMERGENCY) {
         if (conf->zone != NULL) {
-            r->headers_out.retry_after = ngx_time() + conf->zone->window;
+            traction_set_retry_after(r, conf->zone->window);
         }
-
         return NGX_HTTP_SERVICE_UNAVAILABLE;
     }
 
@@ -101,7 +128,7 @@ traction_decide(ngx_http_request_t *r, ngx_http_traction_loc_conf_t *conf,
             && traction_recovery_should_shed(conf, conf->zone->shm, score))
         {
             allow_rate = traction_recovery_allow_rate(conf, score);
-            r->headers_out.retry_after = ngx_time() + 1;
+            traction_set_retry_after(r, 1);
 
             ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                           "traction: zone \"%V\" recovery shed "
@@ -115,7 +142,7 @@ traction_decide(ngx_http_request_t *r, ngx_http_traction_loc_conf_t *conf,
     }
 
     if (state == TRACTION_STATE_CRITICAL) {
-        r->headers_out.retry_after = ngx_time() + 1;
+        traction_set_retry_after(r, 1);
         return NGX_HTTP_TOO_MANY_REQUESTS;
     }
 
@@ -124,7 +151,7 @@ traction_decide(ngx_http_request_t *r, ngx_http_traction_loc_conf_t *conf,
         && conf->zone->shm != NULL
         && traction_warning_should_shed(conf, conf->zone->shm))
     {
-        r->headers_out.retry_after = ngx_time() + 1;
+        traction_set_retry_after(r, 1);
 
         ngx_log_error(NGX_LOG_WARN, r->connection->log, 0,
                       "traction: zone \"%V\" warning rate_limit shed "

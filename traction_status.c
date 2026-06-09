@@ -46,7 +46,10 @@ traction_status_content_handler(ngx_http_request_t *r)
     }
 
     stats = traction_calculate_stats(zone->shm);
-    state = traction_get_state(conf, stats.score);
+    state = traction_get_state(
+    conf,
+    stats.score,
+    zone->shm);
 
     if (stats.requests > 0) {
         error_rate = ((double) stats.errors / (double) stats.requests) * 100.0;
