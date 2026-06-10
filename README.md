@@ -6,11 +6,7 @@ Dynamic module for NGINX that implements **adaptive traffic control based on err
 
 ## Overview
 
-# The module monitors HTTP traffic health by tracking error rate in a **sliding time window**, with **per-zone isolated metrics** (service/upstream).
-
-## Updated Implementation
-
-The latest version refactors the HTTP handling logic by introducing a **single generic callback** `http_callback`. Both status queries (`fetch_status`) and test requests (`make_request`) now invoke this callback with a `purpose` argument (`status` or `request`). This reduces code duplication, centralizes error handling, and ensures consistent logging and request scheduling.
+The module monitors HTTP traffic health by tracking error rate in a **sliding time window**, with **per-zone isolated metrics** (service/upstream).
 
 As degradation increases, the module applies progressive actions:
 
@@ -46,7 +42,7 @@ As degradation increases, the module applies progressive actions:
 Metrics are recorded in the **LOG** phase only for requests that reached an upstream (`proxy_pass`, etc.):
 
 - **Request** — incremented for every upstream response
-- **Error** — incremented for 5xx responses, 502, and 504
+- **Error** — incremented for 5xx responses (including 502 and 504)
 
 Requests blocked by the module itself (429/503) are **not** included in metrics.
 
@@ -161,7 +157,7 @@ http {
 |-----------|---------|-------------|
 | `traction_zone name size [window=N]` | `http` | Declares a metrics zone (1–3600s window, default 60) |
 | `traction_control on \| off \| zone=name` | `http`, `server`, `location` | Enables control and associates a zone |
-| `traction_status zone=name` | `server`, `location` | Enables the status endpoint for the zone |
+| `traction_status zone=name` | `location` | Enables the status endpoint for the zone |
 | `traction_warning_threshold N` | `http`, `server`, `location` | Warning threshold (default: 80) |
 | `traction_critical_threshold N` | `http`, `server`, `location` | Critical threshold / 429 (default: 50) |
 | `traction_emergency_threshold N` | `http`, `server`, `location` | Emergency threshold / 503 (default: 20) |
@@ -259,7 +255,7 @@ nginx_circuit_breaker/
 
 **Beta**
 
-Current version: 0.4.0-beta — suitable for wider testing in staging environments. See [CHANGELOG.md](CHANGELOG.md) for details. Not recommended for production without adequate load testing and observability.
+Current version: 0.4.1-beta — suitable for wider testing in staging environments. See [CHANGELOG.md](CHANGELOG.md) for details. Not recommended for production without adequate load testing and observability.
 
 ---
 

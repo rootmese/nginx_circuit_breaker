@@ -24,7 +24,7 @@ static ngx_int_t ngx_http_traction_zone_slot(ngx_conf_t *cf, ngx_str_t *value,
 extern ngx_int_t  traction_handler(ngx_http_request_t *r);
 extern ngx_int_t  traction_log_handler(ngx_http_request_t *r);
 extern ngx_int_t  traction_header_filter_init(ngx_conf_t *cf);
-extern ngx_int_t  traction_status_init(ngx_conf_t *cf);
+extern ngx_int_t  traction_status_handler(ngx_http_request_t *r);
 
 static ngx_command_t  traction_commands[] = {
 
@@ -43,7 +43,7 @@ static ngx_command_t  traction_commands[] = {
       NULL },
 
     { ngx_string("traction_status"),
-      NGX_HTTP_SRV_CONF|NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
+      NGX_HTTP_LOC_CONF|NGX_CONF_TAKE1,
       ngx_http_traction_status_cmd,
       NGX_HTTP_LOC_CONF_OFFSET,
       0,
@@ -187,6 +187,12 @@ ngx_http_traction_zone_cmd(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
             }
 
             window = (ngx_uint_t) n;
+
+        } else {
+            ngx_conf_log_error(NGX_LOG_EMERG, cf, 0,
+                               "unknown traction_zone parameter \"%V\"",
+                               &value[i]);
+            return NGX_CONF_ERROR;
         }
     }
 
@@ -243,8 +249,9 @@ ngx_http_traction_control_cmd(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 static char *
 ngx_http_traction_status_cmd(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
 {
-    ngx_http_traction_loc_conf_t  *tlcf = conf;
-    ngx_str_t                     *value;
+    ngx_http_traction_loc_conf_t   *tlcf = conf;
+    ngx_http_core_loc_conf_t       *clcf;
+    ngx_str_t                      *value;
 
     value = cf->args->elts;
 
@@ -254,6 +261,13 @@ ngx_http_traction_status_cmd(ngx_conf_t *cf, ngx_command_t *cmd, void *conf)
     }
 
     tlcf->status_enabled = 1;
+
+    clcf = ngx_http_conf_get_module_loc_conf(cf, ngx_http_core_module);
+    if (clcf == NULL) {
+        return NGX_CONF_ERROR;
+    }
+
+    clcf->handler = traction_status_handler;
 
     return NGX_CONF_OK;
 }
@@ -332,10 +346,6 @@ traction_init(ngx_conf_t *cf)
     *h = traction_log_handler;
 
     if (traction_header_filter_init(cf) != NGX_OK) {
-        return NGX_ERROR;
-    }
-
-    if (traction_status_init(cf) != NGX_OK) {
         return NGX_ERROR;
     }
 

@@ -50,10 +50,7 @@ traction_log_handler(ngx_http_request_t *r)
 
     traction_record_request(conf->zone->shm);
 
-    if (status >= NGX_HTTP_INTERNAL_SERVER_ERROR
-        || status == NGX_HTTP_BAD_GATEWAY
-        || status == NGX_HTTP_GATEWAY_TIME_OUT)
-    {
+    if (status >= NGX_HTTP_INTERNAL_SERVER_ERROR) {
         traction_record_error(conf->zone->shm);
     }
 

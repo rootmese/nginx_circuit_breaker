@@ -20,6 +20,8 @@ traction_push_header(ngx_http_request_t *r, u_char *name, size_t name_len,
         return NGX_ERROR;
     }
 
+    ngx_memzero(h, sizeof(ngx_table_elt_t));
+
     p = ngx_pnalloc(r->pool, name_len + 1);
     if (p == NULL) {
         return NGX_ERROR;
