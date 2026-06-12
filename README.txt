@@ -546,7 +546,59 @@ Debug:
 
   ================================================================================
 
-  16. SUPPORT
+16. VERSIONING POLICY
+---------------------
+
+This project follows a maintenance-oriented versioning model.
+
+Version numbers do not primarily represent technical stability.
+Instead, they represent the maintainer's support commitment.
+
+0.x Releases
+------------
+
+Versions in the 0.x series are considered functional and tested.
+
+A 0.x release may be used in production environments at the user's
+discretion, but:
+
+  - APIs may change without notice
+  - Features may be redesigned
+  - Long-term maintenance is not guaranteed
+  - Backward compatibility is not a goal
+
+The purpose of the 0.x series is to validate architecture,
+collect feedback, and evaluate community adoption.
+
+1.x Releases
+------------
+
+A project reaches version 1.x only when there is an explicit
+commitment to ongoing maintenance.
+
+This includes:
+
+  - Active updates
+  - Dependency modernization
+  - Security fixes when required
+  - Backward compatibility considerations
+  - Long-term roadmap commitment
+
+In this model, version 1.x represents a maintenance commitment
+rather than a statement about technical maturity.
+
+Notes
+-----
+
+A 0.x release should not be interpreted as unstable software.
+
+Many projects in the 0.x series may already be suitable for
+production workloads, depending on the user's requirements.
+
+The distinction between 0.x and 1.x is support commitment,
+not implementation quality.
+
+  17. SUPPORT
   -----------
 
   For questions or support, contact: agsilveira.7@gmail.com
