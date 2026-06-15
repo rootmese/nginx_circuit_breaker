@@ -271,9 +271,8 @@ See [README.txt](README.txt) for full reference on directives, internal flow, sh
 
 ## License
 
-This project is licensed under the **GNU Lesser General Public License v3.0 (LGPL-3.0)**.
-See the [LICENSE](LICENSE) file for the full text. Replace the copyright holder and year
-in `LICENSE` with the appropriate values for your project if desired.
+This project is licensed under the BSD 2-Clause License.
+See the LICENSE file for details.
 
 ---
 
