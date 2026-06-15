@@ -8,6 +8,9 @@
 #define TRACTION_WINDOW_MAX      3600
 #define TRACTION_WINDOW_DEFAULT  60
 
+#define TRACTION_ZONE            "traction_zone_"
+#define TRACTION_ZONE_LEN        (sizeof(TRACTION_ZONE) - 1)
+
 typedef struct {
     ngx_atomic_t  requests;
     ngx_atomic_t  errors;

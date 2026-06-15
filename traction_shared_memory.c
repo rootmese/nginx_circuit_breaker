@@ -14,7 +14,25 @@ traction_zone_init(ngx_shm_zone_t *shm_zone, void *data)
     conf = shm_zone->data;
 
     if (data) {
-        shm_zone->data = data;
+        /*
+         * Configuration reload: reuse existing shared memory.
+         * If window changed, update shm->window and clear all buckets
+         * so stale metrics from the old window are not carried over.
+         */
+        shm = (traction_zone_shm_t *) shm_zone->shm.addr;
+
+        if (conf != NULL && shm->window != conf->window) {
+            size = traction_zone_shm_size(conf->window);
+            ngx_memzero(shm, size);
+            shm->window = conf->window;
+            shm->last_state = TRACTION_STATE_NORMAL;
+
+            ngx_log_error(NGX_LOG_NOTICE, shm_zone->shm.log, 0,
+                          "traction: zone window changed, buckets reset "
+                          "(%ui buckets)", conf->window);
+        }
+
+        shm_zone->data = shm;
         return NGX_OK;
     }
 
@@ -95,13 +113,13 @@ traction_zone_register(ngx_conf_t *cf, ngx_http_traction_zone_t *zone,
         size = need;
     }
 
-    name.len = zone->name.len + sizeof("traction_zone_") - 1;
-    name.data = ngx_pnalloc(cf->pool, name.len);
+    name.len = TRACTION_ZONE_LEN + zone->name.len;
+    name.data = ngx_pnalloc(cf->pool, name.len + 1);
     if (name.data == NULL) {
         return NGX_ERROR;
     }
 
-    ngx_snprintf(name.data, name.len, "traction_zone_%V", &zone->name);
+    ngx_snprintf(name.data, name.len + 1, "%s%V", TRACTION_ZONE, &zone->name);
 
     shm_zone = ngx_shared_memory_add(cf, &name, size,
                                      &ngx_http_traction_control_module);

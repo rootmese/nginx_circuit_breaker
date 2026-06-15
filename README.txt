@@ -75,10 +75,10 @@ traction_control on | off | zone=name
             to define a zone (directly or inherited).
 
 traction_status zone=name
-  Context : server, location
+  Context : location
   Default : -
-  Notes   : Registers a handler in the CONTENT phase. The location should be
-            exclusive (no proxy_pass). Protect with allow/deny.
+  Notes   : Sets the location content handler (clcf->handler). The location
+            should be exclusive (no proxy_pass). Protect with allow/deny.
 
 traction_warning_threshold N
   Context : http, server, location
@@ -159,7 +159,7 @@ You can keep tuning settings in a dedicated file and include it from `nginx.conf
   [LOG] traction_log_handler
      |  - Only if r->upstream != NULL
      |  - traction_record_request()
-     |  - traction_record_error() if status >= 500, 502 or 504
+     |  - traction_record_error() if status >= 500 (includes 502 and 504)
      v
   End
 
@@ -432,7 +432,7 @@ traction_header_filter.c
   traction_header_filter() - adds warning headers
 
 traction_status.c
-  traction_status_content_handler() - CONTENT
+  traction_status_handler() - CONTENT
 
 
 12. NGINX CONFIGURATION EXAMPLE
@@ -501,7 +501,7 @@ Debug:
   error_log /var/log/nginx/error.log debug;
 
 
-14. KNOWN LIMITATIONS (BETHA)
+14. KNOWN LIMITATIONS (BETA)
 ----------------------------
 
   - Metrics are based only on HTTP status (no explicit timeout treated as
@@ -532,23 +532,73 @@ Debug:
     - Partial shed in warning via atomic counter (shed_counter).
     - Status endpoint reports warning_action and reject rate.
 
-  v0.4 (beta)
+  v0.4.0 (beta)
+    - Recovery state introduced.
+    - Progressive traffic restoration.
+    - Recovery state reporting.
+    - Recovery response headers.
 
-  - Recovery state introduced.
-  - Progressive traffic restoration.
-  - Recovery state reporting.
-  - Recovery response headers.
-  
- v0.4.1-beta
-  - Recovery state introduced.
-  - Progressive traffic restoration (10%, 20%, 50%).
-  - Recovery response headers (X-Traction-State: recovery).
-  - Fixed Retry-After header for nginx 1.28+ compatibility.
-  - Proper struct initialization with NGX_MODULE_V1_PADDING.
+  v0.4.1-beta
+    - Progressive traffic restoration levels detailed (10%, 20%, 50%).
+    - Recovery response headers (X-Traction-State: recovery).
+    - Fixed Retry-After header for nginx 1.28+ compatibility.
+    - Proper struct initialization with NGX_MODULE_V1_PADDING.
 
   ================================================================================
 
-  16. SUPPORT
+16. VERSIONING POLICY
+---------------------
+
+This project follows a maintenance-oriented versioning model.
+
+Version numbers do not primarily represent technical stability.
+Instead, they represent the maintainer's support commitment.
+
+0.x Releases
+------------
+
+Versions in the 0.x series are considered functional and tested.
+
+A 0.x release may be used in production environments at the user's
+discretion, but:
+
+  - APIs may change without notice
+  - Features may be redesigned
+  - Long-term maintenance is not guaranteed
+  - Backward compatibility is not a goal
+
+The purpose of the 0.x series is to validate architecture,
+collect feedback, and evaluate community adoption.
+
+1.x Releases
+------------
+
+A project reaches version 1.x only when there is an explicit
+commitment to ongoing maintenance.
+
+This includes:
+
+  - Active updates
+  - Dependency modernization
+  - Security fixes when required
+  - Backward compatibility considerations
+  - Long-term roadmap commitment
+
+In this model, version 1.x represents a maintenance commitment
+rather than a statement about technical maturity.
+
+Notes
+-----
+
+A 0.x release should not be interpreted as unstable software.
+
+Many projects in the 0.x series may already be suitable for
+production workloads, depending on the user's requirements.
+
+The distinction between 0.x and 1.x is support commitment,
+not implementation quality.
+
+  17. SUPPORT
   -----------
 
   For questions or support, contact: agsilveira.7@gmail.com
