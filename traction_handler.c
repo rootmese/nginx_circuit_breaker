@@ -43,6 +43,14 @@ traction_log_handler(ngx_http_request_t *r)
     }
 
     status = r->headers_out.status;
+	
+	ngx_log_error(
+    NGX_LOG_WARN,
+    r->connection->log,
+    0,
+    "traction: status=%ui upstream=%p",
+    status,
+    r->upstream);
 
     if (status == 0 || r->upstream == NULL) {
         return NGX_DECLINED;
