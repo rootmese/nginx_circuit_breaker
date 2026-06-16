@@ -511,9 +511,76 @@ Debug:
   - The status endpoint exposes metrics without built-in authentication.
   - Fail-open when SHM is unavailable (configurable only in code).
   - Maximum window: 3600 seconds (TRACTION_WINDOW_MAX).
+  
+ 15. FEATURE COMPARISON
+----------------------
+
++--------------------------------------+------------------+------------------+
+| Feature                              | Envoy            | Traction Control |
++--------------------------------------+------------------+------------------+
+| Decision Signal                      | Capacity Metrics | HTTP Error Rate  |
+| Connection Limits                    | Yes              | No               |
+| Pending Request Limits               | Yes              | No               |
+| Concurrent Request Limits            | Yes              | No               |
+| Resource-Based Decisions             | Yes              | No               |
+| HTTP Error Rate Monitoring           | Partial          | Yes              |
+| Sliding Window Error Analysis        | Limited          | Yes              |
+| Shared Memory Across Workers         | Yes              | Yes              |
+| Lock-Free Atomic Counters            | Yes              | Yes              |
+| Progressive Traffic Shedding         | Partial          | Yes              |
+| Automatic Recovery                   | Partial          | Yes              |
+| Progressive Recovery                 | No               | Yes              |
+| Recovery Based on Service Quality    | Partial          | Yes              |
+| Multi-State Degradation Model        | Limited          | Yes              |
+| Adaptive Feedback Control            | No               | Yes              |
++--------------------------------------+------------------+------------------+
+
+Decision Model
+
+  Envoy:
+      Resource Consumption
+              |
+              v
+      Decision to Reject
+
+  Traction Control:
+      Observed Error Rate
+              |
+              v
+      Score Calculation
+              |
+              v
+      Progressive Intervention
+              |
+              v
+      Progressive Recovery
 
 
-15. CHANGE HISTORY
+Summary
+
+  Envoy primarily protects services by enforcing resource
+  and concurrency limits.
+
+  Traction Control primarily protects services by monitoring
+  observed HTTP error rates and adapting traffic admission
+  according to measured service quality.
+
+  Both approaches are complementary and may be deployed
+  together.
+  
+Note:
+
+  This comparison is intended to highlight architectural differences.
+
+  Envoy primarily makes decisions based on resource and concurrency
+  limits, while Traction Control makes decisions based on observed
+  service degradation.
+
+  The purpose of this section is to explain the design philosophy
+  behind Traction Control, not to claim superiority over existing
+  solutions.
+
+16. CHANGE HISTORY
 ------------------
 
   v0.1 (initial alpha)
@@ -546,7 +613,7 @@ Debug:
 
   ================================================================================
 
-16. VERSIONING POLICY
+17. VERSIONING POLICY
 ---------------------
 
 This project follows a maintenance-oriented versioning model.
@@ -598,7 +665,7 @@ production workloads, depending on the user's requirements.
 The distinction between 0.x and 1.x is support commitment,
 not implementation quality.
 
-  17. SUPPORT
+  18. SUPPORT
   -----------
 
   For questions or support, contact: agsilveira.7@gmail.com
