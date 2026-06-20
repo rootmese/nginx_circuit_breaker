@@ -80,6 +80,18 @@ traction_status zone=name
   Notes   : Sets the location content handler (clcf->handler). The location
             should be exclusive (no proxy_pass). Protect with allow/deny.
 
+traction_log on | off
+  Context : http, server, location
+  Default : off
+  Notes   : If enabled, emits an INFO log containing status and upstream
+            information for every request evaluated.
+
+traction_latency_threshold time
+  Context : http, server, location
+  Default : unset
+  Notes   : Sets the maximum allowed total request time (e.g. 500ms).
+            Requests exceeding this threshold are registered as latency errors.
+
 traction_warning_threshold N
   Context : http, server, location
   Default : 80
@@ -168,9 +180,10 @@ You can keep tuning settings in a dedicated file and include it from `nginx.conf
 -----------------------------
 
 Bucket structure:
-  requests  (ngx_atomic_t) - request counter
-  errors    (ngx_atomic_t) - error counter
-  epoch     (ngx_atomic_t) - bucket timestamp (Unix second)
+  requests       (ngx_atomic_t) - request counter
+  errors         (ngx_atomic_t) - error counter
+  latency_errors (ngx_atomic_t) - latency error counter
+  epoch          (ngx_atomic_t) - bucket timestamp (Unix second)
 
 Active bucket index:
   idx = current_unix_time % window
@@ -181,8 +194,10 @@ Lazy reset:
 Score calculation (traction_calculate_stats):
   - Iterate buckets [0 .. window-1]
   - Ignore buckets where epoch + window <= now (expired)
-  - Sum requests and errors with atomic read (fetch_add 0)
-  - score = 100 - (errors/requests * 100)
+  - Sum requests, errors, and latency_errors with atomic read (fetch_add 0)
+  - error_score = 100 - (errors/requests * 100)
+  - latency_score = 100 - (latency_errors/requests * 100)
+  - score = min(error_score, latency_score)
   - No requests in the window: score = 100.0
 
 Memory per zone:

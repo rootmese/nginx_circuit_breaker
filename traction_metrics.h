@@ -5,5 +5,6 @@
 
 void  traction_record_request(traction_zone_shm_t *shm);
 void  traction_record_error(traction_zone_shm_t *shm);
+void  traction_record_latency_error(traction_zone_shm_t *shm);
 
 #endif

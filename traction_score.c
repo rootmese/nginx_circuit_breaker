@@ -10,6 +10,7 @@ traction_calculate_stats(traction_zone_shm_t *shm)
     stats.score = 100.0;
     stats.requests = 0;
     stats.errors = 0;
+    stats.latency_errors = 0;
 
     if (shm == NULL || shm->window == 0) {
         return stats;
@@ -28,6 +29,7 @@ traction_calculate_stats(traction_zone_shm_t *shm)
 
         stats.requests += (uint64_t) ngx_atomic_fetch_add(&b->requests, 0);
         stats.errors += (uint64_t) ngx_atomic_fetch_add(&b->errors, 0);
+        stats.latency_errors += (uint64_t) ngx_atomic_fetch_add(&b->latency_errors, 0);
     }
 
     if (stats.requests == 0) {
@@ -35,8 +37,11 @@ traction_calculate_stats(traction_zone_shm_t *shm)
         return stats;
     }
 
-    stats.score = 100.0
-                  - (((double) stats.errors / (double) stats.requests) * 100.0);
+    {
+        double error_score = 100.0 - (((double) stats.errors / (double) stats.requests) * 100.0);
+        double latency_score = 100.0 - (((double) stats.latency_errors / (double) stats.requests) * 100.0);
+        stats.score = error_score < latency_score ? error_score : latency_score;
+    }
 
     return stats;
 }

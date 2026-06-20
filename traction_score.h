@@ -7,6 +7,7 @@ typedef struct {
     double    score;
     uint64_t  requests;
     uint64_t  errors;
+    uint64_t  latency_errors;
 } traction_stats_t;
 
 traction_stats_t  traction_calculate_stats(traction_zone_shm_t *shm);

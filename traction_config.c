@@ -36,6 +36,8 @@ traction_create_loc_conf(ngx_conf_t *cf)
 
     conf->enabled = NGX_CONF_UNSET;
     conf->status_enabled = NGX_CONF_UNSET;
+    conf->log_enabled = NGX_CONF_UNSET;
+    conf->latency_threshold = NGX_CONF_UNSET_MSEC;
     conf->warning_threshold = NGX_CONF_UNSET_UINT;
     conf->critical_threshold = NGX_CONF_UNSET_UINT;
     conf->emergency_threshold = NGX_CONF_UNSET_UINT;
@@ -79,6 +81,8 @@ traction_merge_loc_conf(ngx_conf_t *cf, void *parent, void *child)
 
     ngx_conf_merge_value(conf->enabled, prev->enabled, 0);
     ngx_conf_merge_value(conf->status_enabled, prev->status_enabled, 0);
+    ngx_conf_merge_value(conf->log_enabled, prev->log_enabled, 0);
+    ngx_conf_merge_msec_value(conf->latency_threshold, prev->latency_threshold, 0);
     ngx_conf_merge_uint_value(conf->warning_threshold, prev->warning_threshold,
                               80);
     ngx_conf_merge_uint_value(conf->critical_threshold, prev->critical_threshold,

@@ -35,6 +35,8 @@ traction_log_handler(ngx_http_request_t *r)
 {
     ngx_http_traction_loc_conf_t  *conf;
     ngx_uint_t                     status;
+    ngx_time_t                    *tp;
+    ngx_msec_int_t                 ms;
 
     conf = ngx_http_get_module_loc_conf(r, ngx_http_traction_control_module);
 
@@ -43,14 +45,16 @@ traction_log_handler(ngx_http_request_t *r)
     }
 
     status = r->headers_out.status;
-	
-	ngx_log_error(
-    NGX_LOG_WARN,
-    r->connection->log,
-    0,
-    "traction: status=%ui upstream=%p",
-    status,
-    r->upstream);
+
+    if (conf->log_enabled) {
+        ngx_log_error(
+        NGX_LOG_INFO,
+        r->connection->log,
+        0,
+        "traction: status=%ui upstream=%p",
+        status,
+        r->upstream);
+    }
 
     if (status == 0 || r->upstream == NULL) {
         return NGX_DECLINED;
@@ -60,6 +64,17 @@ traction_log_handler(ngx_http_request_t *r)
 
     if (status >= NGX_HTTP_INTERNAL_SERVER_ERROR) {
         traction_record_error(conf->zone->shm);
+    }
+
+    if (conf->latency_threshold != NGX_CONF_UNSET_MSEC) {
+        tp = ngx_timeofday();
+        ms = (ngx_msec_int_t)
+                 ((tp->sec - r->start_sec) * 1000 + (tp->msec - r->start_msec));
+        ms = ngx_max(ms, 0);
+
+        if (ms > (ngx_msec_int_t) conf->latency_threshold) {
+            traction_record_latency_error(conf->zone->shm);
+        }
     }
 
     return NGX_DECLINED;

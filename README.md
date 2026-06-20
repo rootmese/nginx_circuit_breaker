@@ -6,7 +6,7 @@ Dynamic module for NGINX that implements **adaptive traffic control based on err
 
 ## Overview
 
-The module monitors HTTP traffic health by tracking error rate in a **sliding time window**, with **per-zone isolated metrics** (service/upstream).
+The module monitors HTTP traffic health by tracking the error rate and **latency** in a **sliding time window**, with **per-zone isolated metrics** (service/upstream).
 
 As degradation increases, the module applies progressive actions:
 
@@ -27,6 +27,7 @@ As degradation increases, the module applies progressive actions:
 - **Named zones** with independent metrics per service
 - Configurable time window from **1 to 3600 seconds**
 - Sliding window with rotating buckets and epoch reset
+- **Latency Score** integration (lowest score between errors and latency wins)
 - Thresholds configurable at `http`, `server`, or `location`
 - Monitoring endpoint (`traction_status`)
 - Configurable warning action (`headers`, `rate_limit`, `off`)
@@ -43,6 +44,7 @@ Metrics are recorded in the **LOG** phase only for requests that reached an upst
 
 - **Request** — incremented for every upstream response
 - **Error** — incremented for 5xx responses (including 502 and 504)
+- **Latency Error** — incremented if the total request time exceeds the configured `traction_latency_threshold`.
 
 Requests blocked by the module itself (429/503) are **not** included in metrics.
 
@@ -59,7 +61,10 @@ Expired buckets are ignored in the calculation. When the second changes, the cor
 ### Score Calculation
 
 ```text
-Score = 100 - ((Errors / Requests) * 100)
+Error Score = 100 - ((Errors / Requests) * 100)
+Latency Score = 100 - ((Latency Errors / Requests) * 100)
+
+Final Score = min(Error Score, Latency Score)
 ```
 
 If there are no requests in the window, the score defaults to **100** (healthy).
@@ -158,6 +163,8 @@ http {
 | `traction_zone name size [window=N]` | `http` | Declares a metrics zone (1–3600s window, default 60) |
 | `traction_control on \| off \| zone=name` | `http`, `server`, `location` | Enables control and associates a zone |
 | `traction_status zone=name` | `location` | Enables the status endpoint for the zone |
+| `traction_log on \| off` | `http`, `server`, `location` | Enables info logging for every request (default: `off`) |
+| `traction_latency_threshold time` | `http`, `server`, `location` | Sets the maximum request time before registering a latency error (e.g. `500ms`) |
 | `traction_warning_threshold N` | `http`, `server`, `location` | Warning threshold (default: 80) |
 | `traction_critical_threshold N` | `http`, `server`, `location` | Critical threshold / 429 (default: 50) |
 | `traction_emergency_threshold N` | `http`, `server`, `location` | Emergency threshold / 503 (default: 20) |

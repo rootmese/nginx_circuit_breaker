@@ -23,6 +23,8 @@ typedef struct {
 typedef struct {
     ngx_flag_t              enabled;
     ngx_flag_t              status_enabled;
+    ngx_flag_t              log_enabled;
+    ngx_msec_t              latency_threshold;
     ngx_http_traction_zone_t  *zone;
     ngx_http_traction_zone_t  *status_zone;
     ngx_uint_t              warning_threshold;
