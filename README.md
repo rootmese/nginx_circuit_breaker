@@ -257,12 +257,86 @@ nginx_circuit_breaker/
 ```
 
 ---
-
 ## Project Status
 
-**Beta**
+### Current Version
+**v0.4.2 — Latency Score Release**
 
-Current version: 0.4.1-beta — suitable for wider testing in staging environments. See [CHANGELOG.md](CHANGELOG.md) for details. Not recommended for production without adequate load testing and observability.
+This version represents a major step forward in the adaptive NGINX traffic control model, introducing full integration between error rate and latency as decision signals, along with improvements in the state machine and overall system stability.
+
+---
+
+### Overall Status
+**Beta (staging-ready / wider testing phase)**
+
+The module is fully functional and suitable for real-load testing in staging environments. However, it is not yet recommended for production without proper observability, stress testing, and operational validation at scale.
+
+---
+
+### Highlights (v0.4.2)
+
+- Introduction of **Latency Score**
+  - New metric based on `latency_errors`
+  - Final score formula:
+    - `final_score = min(error_score, latency_score)`
+- Extended metrics model:
+  - `requests`
+  - `errors`
+  - `latency_errors`
+- Shared memory structure updated to support latency tracking per bucket
+- Improved decision engine sensitivity to real performance degradation
+- Tight integration with NGINX lifecycle phases:
+  - `LOG` (metrics collection)
+  - `PREACCESS` (traffic decision)
+  - `HEADER FILTER` (observability headers)
+  - `STATUS endpoint`
+
+---
+
+### State Machine (Updated)
+
+The system now operates with five states:
+
+- **NORMAL**
+- **WARNING**
+- **CRITICAL (HTTP 429)**
+- **EMERGENCY (HTTP 503)**
+- **RECOVERY (new)**
+
+#### RECOVERY (new state)
+- Introduced to prevent oscillation between EMERGENCY and NORMAL
+- Enables **progressive traffic restoration**
+  - 10% → 20% → 50%
+- Remains active until service health stabilizes
+- Reduces flapping under unstable upstream conditions
+
+---
+
+### Architecture Overview
+
+- Metrics collected in the `LOG` phase
+- Decisions made in the `PREACCESS` phase
+- Observability headers injected in `HEADER FILTER`
+- Monitoring via `traction_status` endpoint
+- Shared memory per zone with rotating time buckets
+- Sliding window model (1–3600 seconds)
+
+---
+
+### Known Limitations
+
+- Metrics are still based only on HTTP-level signals (no CPU/memory upstream telemetry)
+- Warning-level load shedding is still heuristic-based
+- Recovery phase uses a fixed progression (10% → 20% → 50%) instead of a continuous curve
+
+---
+
+### Roadmap (Next Steps)
+
+- Adaptive recovery curve (non-linear traffic ramp-up)
+- External signal integration (upstream health, latency percentiles)
+- Enhanced Latency Score (optional p95/p99 weighting)
+- Expanded observability export (Prometheus-compatible metrics)
 
 ---
 

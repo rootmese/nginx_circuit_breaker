@@ -6,10 +6,11 @@
 ---------------
 
 The ngx_http_traction_control module implements an adaptive circuit breaker
-based on HTTP error rate observed in a sliding time window.
+based on HTTP error rate and latency signals observed in a sliding time window.
 
 Goal: reduce pressure on degraded upstreams before abrupt collapses by applying
-progressive degradation (warning → 429 → 503).
+progressive degradation (warning → 429 → 503), combined with latency-aware
+decision making.
 
 1.1 DESIGN PHILOSOPHY
 ---------------------
@@ -19,10 +20,9 @@ traffic is either allowed or blocked. While simple, abrupt state
 changes can create oscillation, traffic spikes during recovery,
 and repeated service instability.
 
-Traction Control follows a different approach inspired by the
-control philosophy used in Formula 1, particularly the McLaren
-MP4-20. Rather than applying sudden transitions, power delivery
-is adjusted progressively to maintain vehicle stability when grip
+Traction Control follows a continuous degradation model inspired by the
+control philosophy used in Formula 1, particularly the McLaren MP4-20.
+Instead of abrupt cutoffs, system pressure is reduced progressively as grip
 conditions deteriorate.
 
 The same principle is applied to HTTP traffic.
@@ -31,17 +31,18 @@ As upstream health degrades, the module progressively increases
 intervention levels (warning → critical → emergency). When the
 service recovers, traffic is not immediately restored to 100%.
 Instead, requests are gradually reintroduced through a dedicated
-recovery phase, reducing the risk of instability and repeated
-failure cycles.
+RECOVERY phase, reducing instability and avoiding feedback oscillation.
 
-The objective is not simply to stop traffic, but to maintain
-system stability under adverse conditions while allowing a
-controlled return to normal operation.
+Additionally, the system now considers latency degradation as a first-class
+signal, not only error rate.
+
+The objective is not simply to stop traffic, but to maintain system stability
+under adverse conditions while enabling controlled recovery.
 
 2. ZONE MODEL
 -------------
 
-Each monitored service/upstream has a named "zone" with its own shared memory
+Each monitored service/upstream has a named "zone" with isolated shared memory
 across all workers.
 
 Declaration:
@@ -49,12 +50,12 @@ Declaration:
 
 Parameters:
   <name>     - Unique identifier (e.g. api_backend, payments)
-  <size>     - Minimum SHM zone size (e.g. 1m, 512k). Automatically adjusted
-               if smaller than required by the window.
+  <size>     - Minimum SHM zone size (e.g. 1m, 512k)
+               Automatically adjusted if smaller than required.
   window=N   - Window in seconds (1 to 3600, default 60)
 
-Multiple locations can reference the same zone. Locations using different
-zones keep metrics fully isolated.
+Multiple locations may reference the same zone.
+Each zone maintains independent metrics and state.
 
 Example:
   traction_zone api_backend 1m window=120;
@@ -71,59 +72,51 @@ traction_zone name size [window=N]
 traction_control on | off | zone=name
   Context : http, server, location
   Default : off
-  Notes   : "zone=name" implies enabled=on. When enabled=on it is mandatory
-            to define a zone (directly or inherited).
+  Notes   : "zone=name" enables the module and binds a zone.
 
 traction_status zone=name
   Context : location
   Default : -
-  Notes   : Sets the location content handler (clcf->handler). The location
-            should be exclusive (no proxy_pass). Protect with allow/deny.
+  Notes   : Content handler for metrics exposure. Must be isolated.
 
 traction_log on | off
   Context : http, server, location
   Default : off
-  Notes   : If enabled, emits an INFO log containing status and upstream
-            information for every request evaluated.
 
 traction_latency_threshold time
   Context : http, server, location
   Default : unset
-  Notes   : Sets the maximum allowed total request time (e.g. 500ms).
-            Requests exceeding this threshold are registered as latency errors.
+  Notes   : Requests exceeding this duration are counted as
+            latency_errors.
 
 traction_warning_threshold N
-  Context : http, server, location
-  Default : 80
-  Range   : 0 to 100
-
 traction_critical_threshold N
-  Context : http, server, location
-  Default : 50
-  Range   : 0 to 100
-
 traction_emergency_threshold N
   Context : http, server, location
-  Default : 20
-  Range   : 0 to 100
+  Default : 80 / 50 / 20
 
-Merge validation:
-  emergency_threshold < critical_threshold < warning_threshold
+Validation:
+  emergency < critical < warning
 
 traction_warning_action headers | off | rate_limit=N%
   Context : http, server, location
   Default : headers
-  Values  :
-    headers       - Only X-Traction-* headers and WARN log (no blocking)
-    off           - No action in warning; blocking only occurs in critical/emergency
-    rate_limit=N% - Reject N% of requests with HTTP 429 in warning;
-                    admitted requests receive X-Traction-* headers
-  Range N  : 1 to 99 (only for rate_limit)
 
-3.1 TUNING / NGINX CONFIGURATION
--------------------------------
+  headers:
+    - Allow traffic
+    - Emit X-Traction-* headers
 
-This module is tuned via standard NGINX configuration directives. There is no separate token or external tuning file required by the module itself.
+  off:
+    - No intervention in WARNING state
+
+  rate_limit=N%:
+    - Probabilistic shedding using atomic counter
+    - Remaining traffic receives headers
+
+3.1 CONFIGURATION
+-----------------
+
+Standard NGINX configuration only.
 
 Example:
 
@@ -142,8 +135,6 @@ Example:
       }
   }
 
-You can keep tuning settings in a dedicated file and include it from `nginx.conf` using `include /path/to/traction_tuning.conf;`.
-
 4. REQUEST FLOW
 ---------------
 
@@ -151,540 +142,217 @@ You can keep tuning settings in a dedicated file and include it from `nginx.conf
      |
      v
   [PREACCESS] traction_handler
-     |  - Checks enabled + zone
-     |  - Calculates score in the zone window
-     |  - emergency  -> 503 + Retry-After (window seconds)
-     |  - critical   -> 429 + Retry-After (1 second)
-     |  - warning + rate_limit -> shed N% with 429 (atomic counter)
-     |  - warning/normal -> NGX_DECLINED (continue)
+     |  - Zone lookup
+     |  - Score computation (error + latency)
+     |  - emergency  -> 503
+     |  - critical   -> 429
+     |  - warning    -> optional shedding
+     |  - normal     -> allow
      v
-  [UPSTREAM] proxy_pass / fastcgi / etc.
+  Upstream
      |
      v
-  [HEADER FILTER] traction_header_filter
-     |  - If warning + action headers/rate_limit: X-Traction-State,
-     |    X-Traction-Score, X-Traction-Zone and NGX_LOG_WARN
+  [HEADER FILTER]
+     - X-Traction-State
+     - X-Traction-Score
+     - X-Traction-Zone
+     - WARN logs (if applicable)
      v
-  Response to client
+  Response
      |
      v
-  [LOG] traction_log_handler
-     |  - Only if r->upstream != NULL
-     |  - traction_record_request()
-     |  - traction_record_error() if status >= 500 (includes 502 and 504)
-     v
-  End
+  [LOG PHASE]
+     - request counter increment
+     - error detection (>=500)
+     - latency_error if threshold exceeded
 
-
-5. SLIDING WINDOW AND BUCKETS
+5. SLIDING WINDOW AND METRICS
 -----------------------------
 
 Bucket structure:
-  requests       (ngx_atomic_t) - request counter
-  errors         (ngx_atomic_t) - error counter
-  latency_errors (ngx_atomic_t) - latency error counter
-  epoch          (ngx_atomic_t) - bucket timestamp (Unix second)
+  requests
+  errors
+  latency_errors
+  epoch
 
-Active bucket index:
-  idx = current_unix_time % window
+Score model:
 
-Lazy reset:
-  When epoch != current_second, the bucket is zeroed before the write.
+  error_score   = 100 - (errors / requests * 100)
+  latency_score = 100 - (latency_errors / requests * 100)
 
-Score calculation (traction_calculate_stats):
-  - Iterate buckets [0 .. window-1]
-  - Ignore buckets where epoch + window <= now (expired)
-  - Sum requests, errors, and latency_errors with atomic read (fetch_add 0)
-  - error_score = 100 - (errors/requests * 100)
-  - latency_score = 100 - (latency_errors/requests * 100)
-  - score = min(error_score, latency_score)
-  - No requests in the window: score = 100.0
+  final_score = min(error_score, latency_score)
 
-Memory per zone:
-  sizeof(traction_zone_shm_t) + window * sizeof(traction_bucket_t)
-
-Additional fields in zone SHM:
-
-  shed_counter (ngx_atomic_t)
-      Atomic counter used by warning rate_limit=N%
-      to distribute request shedding across workers.
-
-  last_state (ngx_atomic_t)
-      Stores the previous global state of the zone.
-      Used by the recovery state machine to detect
-      transitions from EMERGENCY to RECOVERY.
+Empty window:
+  score = 100
 
 6. STATE MACHINE
 ----------------
 
-  traction_get_state(conf, score):
-
-  score >= warning_threshold        -> TRACTION_STATE_NORMAL
-  score >= critical_threshold       -> TRACTION_STATE_WARNING
-  score >= emergency_threshold      -> TRACTION_STATE_CRITICAL
-  score <  emergency_threshold      -> TRACTION_STATE_EMERGENCY
+  score >= warning_threshold        -> NORMAL
+  score >= critical_threshold       -> WARNING
+  score >= emergency_threshold      -> CRITICAL
+  score <  emergency_threshold      -> EMERGENCY
 
 
-  Recovery Transition:
+Recovery Transition:
 
-  If the previous state was EMERGENCY or RECOVERY and the score
-  rises above emergency_threshold but remains below
-  critical_threshold, the state becomes:
+If previous state was EMERGENCY or RECOVERY and score rises
+above emergency_threshold but remains below critical_threshold:
 
-      TRACTION_STATE_RECOVERY
-
-
-  State Flow:
-
-      NORMAL
-         |
-         v
-      WARNING
-         |
-         v
-      CRITICAL
-         |
-         v
-      EMERGENCY
-         |
-         v
-      RECOVERY
-         |
-         +----------------+
-         |                |
-         v                v
-      WARNING          NORMAL
+    state = RECOVERY
 
 
-  Actions:
+State Flow:
 
-  NORMAL
-      - no intervention
-
-  WARNING
-      - depends on traction_warning_action
-        (see section 6.1)
-
-  CRITICAL
-      - HTTP 429 (Too Many Requests)
-      - 100% of requests rejected
-
-  EMERGENCY
-      - HTTP 503 (Service Unavailable)
-      - 100% of requests rejected
-
-  RECOVERY
-      - gradual traffic restoration
-      - requests are partially allowed based on
-        recovery progress
-      - traffic release levels:
-
-            10% allowed
-            20% allowed
-            50% allowed
-
-      - remaining requests receive HTTP 429
+    NORMAL
+      |
+      v
+    WARNING
+      |
+      v
+    CRITICAL
+      |
+      v
+    EMERGENCY
+      |
+      v
+    RECOVERY
+      |
+      +----------+
+      |          |
+      v          v
+    WARNING     NORMAL
 
 
-  Notes:
+RECOVERY behavior:
 
-  RECOVERY is entered only after an EMERGENCY state.
+- Progressive traffic restoration:
+    10% → 20% → 50%
+- Remaining requests receive 429
+- Prevents oscillation between EMERGENCY and NORMAL
+- Ends when score rises above warning threshold
 
-  While in RECOVERY, traffic is progressively restored
-  as the score improves.
+7. WARNING ACTION
+-----------------
 
-  RECOVERY remains active while the score is between
-  emergency_threshold and critical_threshold.
+headers:
+  - Allow traffic
+  - Add X-Traction-* headers
 
-  If the score rises above warning_threshold, the state
-  returns directly to NORMAL.
+off:
+  - No intervention
 
-  The RECOVERY state prevents oscillation between
-  EMERGENCY and NORMAL by progressively reintroducing
-  traffic as service health improves.
+rate_limit=N%:
+  - Atomic counter-based distributed shedding
+  - N% approximate global rejection
 
-6.1 WARNING ACTION (traction_warning_action)
--------------------------------------------
+8. RESPONSE HEADERS
+-------------------
 
-  headers (default)
-    - PREACCESS: allow traffic
-    - HEADER FILTER: add X-Traction-* + WARN log
-
-  off
-    - No intervention until critical/emergency
-
-  rate_limit=N%
-    - PREACCESS: increment atomic shed_counter in the zone SHM
-      if (counter % 100) < N -> HTTP 429 + Retry-After (1s) + WARN log
-      else -> continue
-    - HEADER FILTER: X-Traction-* headers on admitted requests
-
-  Worker distribution:
-    Shared atomic counter ensures ~N% aggregate rejection.
-
-
-7. RESPONSE HEADERS (WARNING)
------------------------------
-
-  Emitted when warning_action = headers or rate_limit
-  (only for requests that reached the upstream):
-
-  X-Traction-State: warning
-  X-Traction-Score: <score with 2 decimal places>
-  X-Traction-Zone:  <zone name>
-
-
-8. traction_status ENDPOINT
----------------------------
-
-Accepted methods: GET, HEAD
-
-Response Content-Type: text/plain
-
-Fields:
-  zone                  - zone name
-  window                - window in seconds
-  score                 - current score
-  requests              - total in window
-  errors                - total in window
-  error_rate            - error percentage
-  state                 - normal | warning | critical | emergency
-  thresholds            - values configured in location
-  warning_action        - headers | off | rate_limit
-  warning_reject_rate   - percentage N (0 if not rate_limit)
-
-The "critical" or "emergency" state in the status reflects the current score;
-this endpoint does not block requests — it only reports.
-
+X-Traction-State
+X-Traction-Score
+X-Traction-Zone
 
 9. SHARED MEMORY
----------------
+----------------
 
-Internal SHM zone name: traction_zone_<name>
+Each zone:
 
-Initialization:
-  - traction_zone_register() in postconfiguration (per zone)
-  - traction_zone_init() callback on the first cycle
-  - traction_zones_setup() in init_process of each worker
-
-Reload (SIGHUP):
-  - Existing data is reused via the init callback data parameter
+  requests
+  errors
+  latency_errors
+  epoch
+  shed_counter
+  last_state
 
 Fail-open:
-  - If SHM is unavailable in PREACCESS, the request is allowed with WARN log
-
+  If SHM unavailable -> request allowed + WARN log
 
 10. BUILD
 --------
 
-Prerequisites:
-  - NGINX source tree matching the target version
-  - Standard C toolchain
+Build inside NGINX source tree:
 
-Note: this repository does not include a `Makefile` or `configure` script.
-Build the module from within the NGINX source tree using NGINX's build system.
-
-Dynamic module:
   ./configure --add-dynamic-module=/path/to/nginx_circuit_breaker
   make modules
 
-Artifact:
-  objs/ngx_http_traction_control_module.so  (Linux)
-  objs/ngx_http_traction_control_module.so  or .dll (depending on platform)
-
-Load:
-  load_module modules/ngx_http_traction_control_module.so;
-
-Compiled files (config):
-  ngx_http_traction_control_module.c
-  traction_handler.c
-  traction_shared_memory.c
-  traction_metrics.c
-  traction_score.c
-  traction_decision.c
-  traction_config.c
-  traction_state.c
-  traction_warning.c
-  traction_header_filter.c
-  traction_status.c
-
+Output:
+  ngx_http_traction_control_module.so
 
 11. CODE STRUCTURE
------------------
+------------------
 
-ngx_http_traction_control_module.c
-  NGINX module registration, directives, phase init, and process setup.
+- traction_score.c:
+    error + latency scoring
 
-traction_config.c / traction_config.h
-  ngx_http_traction_main_conf_t  - zones array
-  ngx_http_traction_loc_conf_t   - enabled, zone, thresholds, status
-  create/merge configuration per location.
+- traction_state.c:
+    includes RECOVERY transition logic
 
-traction_shared_memory.c / .h
-  SHM zone registration, init callback, worker setup.
+- traction_warning.c:
+    rate limit + headers + shedding
 
-traction_metrics.c / .h
-  traction_record_request(), traction_record_error()
+- traction_handler.c:
+    PREACCESS decision engine
 
-traction_score.c / .h
-  traction_calculate_stats() -> { score, requests, errors }
+- traction_metrics.c:
+    request/error tracking
 
-traction_state.c / .h
-  traction_get_state(), traction_state_name()
-
-traction_warning.c / .h
-  traction_warning_emit_headers(), traction_warning_should_shed(),
-  traction_warning_action_name()
-
-traction_decision.c / .h
-  traction_decide() -> NGX_DECLINED | 429 | 503
-
-traction_handler.c
-  traction_handler()      - PREACCESS
-  traction_log_handler()  - LOG
-
-traction_header_filter.c
-  traction_header_filter() - adds warning headers
-
-traction_status.c
-  traction_status_handler() - CONTENT
-
-
-12. NGINX CONFIGURATION EXAMPLE
------------------------------
+12. CONFIG EXAMPLE
+------------------
 
 http {
-    load_module modules/ngx_http_traction_control_module.so;
-
     traction_zone api_backend 1m window=60;
-    traction_zone pay_backend 1m window=120;
 
-    upstream api_upstream {
-        server 127.0.0.1:8080;
-    }
-
-    upstream pay_upstream {
-        server 127.0.0.1:8081;
-    }
-
-    server {
-        listen 80;
-
-        location /api/ {
-            traction_control zone=api_backend;
-            traction_warning_threshold 80;
-            traction_critical_threshold 50;
-            traction_emergency_threshold 20;
-            traction_warning_action rate_limit=30%;
-            proxy_pass http://api_upstream;
-        }
-
-        location /pay/ {
-            traction_control zone=pay_backend;
-            proxy_pass http://pay_upstream;
-        }
-
-        location = /traction/status {
-            traction_status zone=api_backend;
-            traction_warning_threshold 80;
-            traction_critical_threshold 50;
-            traction_emergency_threshold 20;
-            allow 127.0.0.1;
-            deny all;
-        }
+    location /api {
+        traction_control zone=api_backend;
+        traction_warning_action rate_limit=30%;
+        proxy_pass http://upstream;
     }
 }
 
+13. LIMITATIONS
+---------------
 
-13. TROUBLESHOOTING
--------------------
+- HTTP-only signals (no CPU/memory upstream telemetry)
+- Fixed recovery curve (10% → 20% → 50%)
+- No external observability backend integration
 
-Check whether the module loaded:
-  nginx -V 2>&1 | grep traction
-
-Logs:
-  tail -f /var/log/nginx/error.log | grep traction
-
-Common messages:
-  traction: zone shared memory ready          - OK, zone initialized
-  traction: worker attached to shared memory  - OK, worker attached
-  traction: unknown traction zone             - ERROR, zone not declared
-  traction: shared memory unavailable         - WARN, fail-open active
-
-Debug:
-  ./configure --with-debug --add-dynamic-module=...
-  error_log /var/log/nginx/error.log debug;
-
-
-14. KNOWN LIMITATIONS (BETA)
-----------------------------
-
-  - Metrics are based only on HTTP status (no explicit timeout treated as
-    error, except 504 Gateway Timeout).
-  - Bucket reset by epoch has a small race window across workers
-    (acceptable for aggregated metrics).
-  - The status endpoint exposes metrics without built-in authentication.
-  - Fail-open when SHM is unavailable (configurable only in code).
-  - Maximum window: 3600 seconds (TRACTION_WINDOW_MAX).
-  
- 15. FEATURE COMPARISON
+14. FEATURE COMPARISON
 ----------------------
 
-+--------------------------------------+------------------+------------------+
-| Feature                              | Envoy            | Traction Control |
-+--------------------------------------+------------------+------------------+
-| Decision Signal                      | Capacity Metrics | HTTP Error Rate  |
-| Connection Limits                    | Yes              | No               |
-| Pending Request Limits               | Yes              | No               |
-| Concurrent Request Limits            | Yes              | No               |
-| Resource-Based Decisions             | Yes              | No               |
-| HTTP Error Rate Monitoring           | Partial          | Yes              |
-| Sliding Window Error Analysis        | Limited          | Yes              |
-| Shared Memory Across Workers         | Yes              | Yes              |
-| Lock-Free Atomic Counters            | Yes              | Yes              |
-| Progressive Traffic Shedding         | Partial          | Yes              |
-| Automatic Recovery                   | Partial          | Yes              |
-| Progressive Recovery                 | No               | Yes              |
-| Recovery Based on Service Quality    | Partial          | Yes              |
-| Multi-State Degradation Model        | Limited          | Yes              |
-| Adaptive Feedback Control            | No               | Yes              |
-+--------------------------------------+------------------+------------------+
+Envoy vs Traction Control:
 
-Decision Model
+- Envoy: resource-based control
+- Traction Control: service-quality feedback control (error + latency)
 
-  Envoy:
-      Resource Consumption
-              |
-              v
-      Decision to Reject
-
-  Traction Control:
-      Observed Error Rate
-              |
-              v
-      Score Calculation
-              |
-              v
-      Progressive Intervention
-              |
-              v
-      Progressive Recovery
-
-
-Summary
-
-  Envoy primarily protects services by enforcing resource
-  and concurrency limits.
-
-  Traction Control primarily protects services by monitoring
-  observed HTTP error rates and adapting traffic admission
-  according to measured service quality.
-
-  Both approaches are complementary and may be deployed
-  together.
-  
-Note:
-
-  This comparison is intended to highlight architectural differences.
-
-  Envoy primarily makes decisions based on resource and concurrency
-  limits, while Traction Control makes decisions based on observed
-  service degradation.
-
-  The purpose of this section is to explain the design philosophy
-  behind Traction Control, not to claim superiority over existing
-  solutions.
-
-16. CHANGE HISTORY
+15. CHANGE HISTORY
 ------------------
 
-  v0.1 (initial alpha)
-    - Global score, fixed 60s window, no error recording.
+v0.4.2
+  - Latency Score introduced
+  - latency_errors added
+  - final_score = min(error, latency)
+  - improved state consistency
 
-  v0.2 (alpha)
-    - Named zones with service-isolated SHM.
-    - Dynamic window 1-3600s.
-    - Error recording in LOG phase.
-    - Warning threshold with X-Traction-* headers.
-    - traction_status endpoint.
-    - Full configuration directives.
+v0.4.1
+  - Recovery refinement
+  - structured recovery levels
+  - header fixes
 
-  v0.3 (current alpha)
-    - traction_warning_action: headers, off, rate_limit=N%.
-    - Partial shed in warning via atomic counter (shed_counter).
-    - Status endpoint reports warning_action and reject rate.
+v0.4.0
+  - Recovery state introduced
 
-  v0.4.0 (beta)
-    - Recovery state introduced.
-    - Progressive traffic restoration.
-    - Recovery state reporting.
-    - Recovery response headers.
-
-  v0.4.1-beta
-    - Progressive traffic restoration levels detailed (10%, 20%, 50%).
-    - Recovery response headers (X-Traction-State: recovery).
-    - Fixed Retry-After header for nginx 1.28+ compatibility.
-    - Proper struct initialization with NGX_MODULE_V1_PADDING.
-
-  ================================================================================
-
-17. VERSIONING POLICY
+16. VERSIONING POLICY
 ---------------------
 
-This project follows a maintenance-oriented versioning model.
+0.x = functional, evolving system
+1.x = maintenance commitment
 
-Version numbers do not primarily represent technical stability.
-Instead, they represent the maintainer's support commitment.
+18. SUPPORT
+-----------
 
-0.x Releases
-------------
+agsilveira.7@gmail.com
 
-Versions in the 0.x series are considered functional and tested.
-
-A 0.x release may be used in production environments at the user's
-discretion, but:
-
-  - APIs may change without notice
-  - Features may be redesigned
-  - Long-term maintenance is not guaranteed
-  - Backward compatibility is not a goal
-
-The purpose of the 0.x series is to validate architecture,
-collect feedback, and evaluate community adoption.
-
-1.x Releases
-------------
-
-A project reaches version 1.x only when there is an explicit
-commitment to ongoing maintenance.
-
-This includes:
-
-  - Active updates
-  - Dependency modernization
-  - Security fixes when required
-  - Backward compatibility considerations
-  - Long-term roadmap commitment
-
-In this model, version 1.x represents a maintenance commitment
-rather than a statement about technical maturity.
-
-Notes
------
-
-A 0.x release should not be interpreted as unstable software.
-
-Many projects in the 0.x series may already be suitable for
-production workloads, depending on the user's requirements.
-
-The distinction between 0.x and 1.x is support commitment,
-not implementation quality.
-
-  18. SUPPORT
-  -----------
-
-  For questions or support, contact: agsilveira.7@gmail.com
-
-  ================================================================================
-   END OF DOCUMENT
-  ================================================================================
+================================================================================
+ END OF DOCUMENT
+================================================================================
